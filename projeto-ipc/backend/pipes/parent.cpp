@@ -24,9 +24,13 @@ int main(void) {
 
     // Criando o pipe
     if (!CreatePipe(&ReadHandle, &WriteHandle, &sa, 0)) {
-        fprintf(stderr, "Create Pipe Failed");
+        fprintf(stderr, "Falha ao criar o pipe.");
         return 1;
     }
+
+    // Configurar a estrutura STARTUPINFO do processo filho
+    ZeroMemory(&si, sizeof(STARTUPINFO));
+    si.cb = sizeof(STARTUPINFO);
 
     // Configurando a estrutura STARTUPINFO
     GetStartupInfo(&si);
@@ -34,14 +38,24 @@ int main(void) {
 
     // Redirecionando a entrada padrão do processo filho para o pipe
     si.hStdInput = ReadHandle;
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     si.dwFlags |= STARTF_USESTDHANDLES;
 
     //Não mostrar a janela do processo filho
     SetHandleInformation(WriteHandle, HANDLE_FLAG_INHERIT, 0);
 
     // Criando o processo filho
-    CreateProcess(NULL, "child.exe", NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    if (!CreateProcess(NULL, "child.exe", NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        fprintf(stderr, "Falha CreateProcess");
+        CloseHandle(ReadHandle);
+        CloseHandle(WriteHandle);
+        return 1;
+    }
     
+    // Fechar o handle de leitura no processo pai (o filho herdou sua própria cópia)
+    CloseHandle(ReadHandle);
+
     // Escrevendo a mensagem no pipe
     if(!WriteFile(WriteHandle, message, BUFFER_SIZE, &written, NULL)) {
         fprintf(stderr, "Erro na leitura do pipe.");
@@ -49,6 +63,7 @@ int main(void) {
     }
 
     // Fechando o handle de leitura no processo pai
+    CloseHandle(WriteHandle);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return 0;
