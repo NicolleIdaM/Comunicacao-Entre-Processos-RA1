@@ -1,44 +1,51 @@
-#include <sys/types.h>
+#include <windows.h>
 #include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-
-#define READ_END 0
-#define WRITE_END 1
 
 int main(void) {
-    char write_msg[20] = "Hello, World!";
+    HANDLE hRead, hWrite;
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    char write_msg[] = "Hello, World!";
     char read_msg[20];
-    int fd[2];
-    pid_t pid;
+    DWORD bytesWritten, bytesRead;
 
     // Create the pipe
-    if (pipe(fd) == -1) {
-        fprintf(stderr, "Pipe failed");
+    if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
+        fprintf(stderr, "Pipe failed\n");
         return 1;
     }
 
-    // Fork a child process
-    pid = fork();
-    if (pid < 0) {
-        fprintf(stderr, "Fork failed");
+    // Create child process
+    STARTUPINFO si = { sizeof(STARTUPINFO) };
+    PROCESS_INFORMATION pi;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = hRead;
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+
+    // Prepare command line for child (this example just reads from stdin)
+    char cmd[] = "cmd /c more"; // 'more' will echo stdin to stdout
+
+    if (!CreateProcessA(
+        NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        fprintf(stderr, "CreateProcess failed\n");
+        CloseHandle(hRead);
+        CloseHandle(hWrite);
         return 1;
     }
 
-    if (pid > 0) { // Parent process
-        close(fd[READ_END]); // Close unused read end
+    // Parent writes to the pipe
+    WriteFile(hWrite, write_msg, (DWORD)strlen(write_msg), &bytesWritten, NULL);
+    CloseHandle(hWrite); // Done writing
 
-        // Write to the pipe
-        write(fd[WRITE_END], write_msg, strlen(write_msg) + 1);
-        close(fd[WRITE_END]); // Close write end after writing
-    } else { // Child process
-        close(fd[WRITE_END]); // Close unused write end
+    // Optionally, parent can read from child's stdout if needed
 
-        // Read from the pipe
-        read(fd[READ_END], read_msg, sizeof(read_msg));
-        printf("Child received: %s\n", read_msg);
-        close(fd[READ_END]); // Close read end after reading
-    }
+    // Wait for child to finish
+    WaitForSingleObject(pi.hProcess, INFINITE);
+
+    // Clean up
+    CloseHandle(hRead);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
 
     return 0;
 }
