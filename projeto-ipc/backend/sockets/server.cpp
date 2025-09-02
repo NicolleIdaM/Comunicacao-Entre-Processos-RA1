@@ -33,7 +33,7 @@ int main() {
     
     //Criar socket
     server = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == 0) {
+    if (server == 0) {
         printf("Socket falhou: %d\n", WSAGetLastError());
         WSACleanup();
         return 1;
@@ -54,7 +54,14 @@ int main() {
 
     // Vincular o socket
     if (bind(server, (struct sockaddr *)&address, sizeof(address)) == SOCKET_ERROR) {
-        printf("Bind falhou: %d\n", WSAGetLastError());
+        int erro = WSAGetLastError();
+        printf("Bind falhou: %d\n", erro);
+
+        if (erro == WSAEADDRINUSE) {
+            printf("A porta %d já está em uso!\n", PORT);
+            printf("Execute: netstat -ano | findstr :%d\n", PORT);
+        }
+    
         closesocket(server);
         WSACleanup();
         return 1;
@@ -96,7 +103,7 @@ int main() {
     }
 
     // Fechar sockets
-    closesocket(socket);
+    closesocket(client);
     closesocket(server);
     WSACleanup();
     return 0;
