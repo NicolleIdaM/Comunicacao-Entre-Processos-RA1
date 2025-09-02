@@ -8,11 +8,14 @@
 #include <stdlib.h>
 #include <windows.h>
 
+#pragma comment(lib, "ws2_32.lib")
+
 /*****************
  * DEFINES *
  *****************/
 #define PORT 8080 // Porta para escutar conexões
 #define BUFFER_SIZE 1024 // Tamanho do buffer de recepção
+#define SERVER_IP "127.0.0.1"
 
 /*****************
  * MAIN FUNCTION *
