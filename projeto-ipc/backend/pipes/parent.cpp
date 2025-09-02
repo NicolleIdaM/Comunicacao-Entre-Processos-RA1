@@ -18,9 +18,9 @@
  *****************/
 int main(void) {
     HANDLE ReadHandle, WriteHandle;
-    STARTUPINFOA si;  // Use STARTUPINFOA para ANSI
+    STARTUPINFO si;
     PROCESS_INFORMATION pi;
-    char message[BUFFER_SIZE] = "Hello from parent!";
+    char message[BUFFER_SIZE] = "Olá! Processo 2";
     char childProcess[] = "child.exe";
     DWORD written;
 
@@ -28,13 +28,13 @@ int main(void) {
 
     // Criando o pipe
     if (!CreatePipe(&ReadHandle, &WriteHandle, &sa, 0)) {
-        fprintf(stderr, "Create Pipe Failed");
+        fprintf(stderr, "Falha na criaçã do Pipe");
         return 1;
     }
 
     // Configurar a estrutura STARTUPINFO do processo filho
-    ZeroMemory(&si, sizeof(STARTUPINFOA));
-    si.cb = sizeof(STARTUPINFOA);
+    ZeroMemory(&si, sizeof(STARTUPINFO));
+    si.cb = sizeof(STARTUPINFO);
 
     // Redirecionando os handles padrão do processo filho
     si.hStdInput = ReadHandle;
@@ -45,9 +45,10 @@ int main(void) {
     // Processo filho não herda o handle de escrita
     SetHandleInformation(WriteHandle, HANDLE_FLAG_INHERIT, 0);
 
-    // Criando o processo filho com versão ANSI EXPLÍCITA
-    if (!CreateProcessA(NULL, childProcess, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
-        fprintf(stderr, "CreateProcess Failed");
+    // Criando o processo filho
+    if (!CreateProcessA(NULL, childProcess, NULL, NULL, 
+                      TRUE, 0, NULL, NULL, &si, &pi)) {
+        fprintf(stderr, "CreateProcess Falhou");
         CloseHandle(ReadHandle);
         CloseHandle(WriteHandle);
         return 1;
@@ -60,6 +61,10 @@ int main(void) {
     if(!WriteFile(WriteHandle, message, BUFFER_SIZE, &written, NULL)) {
         fprintf(stderr, "Erro na escrita do pipe.");
     }
+
+    // SAÍDA EM JSON TAMBÉM NO PROCESSO PAI - PARA O FRONTEND
+    printf("{Processo 1 enviou: \"%s\"}\n", message);
+    fflush(stdout);
 
     // Fechar todos os handles
     CloseHandle(WriteHandle);
