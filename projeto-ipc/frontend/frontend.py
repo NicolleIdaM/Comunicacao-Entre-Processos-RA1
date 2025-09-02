@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 from tkinter import *
 from PIL import ImageTk,Image
 from tkinter import messagebox
@@ -30,5 +29,4 @@ treisbutaum = Button(root, text="Memória compartilhada",command=myClick)
 treisbutaum.pack(side='left')
 
 root.mainloop()
-=======
->>>>>>> 3e4f1b43e4dd5f4fc389423b3157bbe4d24aff04
+
