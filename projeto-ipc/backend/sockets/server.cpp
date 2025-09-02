@@ -18,48 +18,86 @@
  * MAIN FUNCTION *
  *****************/
 int main() {
-    int server, socket;
+    WSADATA wsaData;
+    SOCKET server, client;
     struct sockaddr_in address;
+    int addrlen = sizeof(address);
+    char buffer[BUFFER_SIZE] = {0};
     int opt = 1;
 
+    // Inicializar Winsock (OBRIGATÓRIO no Windows)
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        printf("WSAStartup failed: %d\n", WSAGetLastError());
+        return 1;
+    }
+    
     //Criar socket
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    server = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == 0) {
-        perror("Socket falhou");
-        exit(EXIT_FAILURE);
+        printf("Socket falhou: %d\n", WSAGetLastError());
+        WSACleanup();
+        return 1;
+    }
+
+    // Configurar socket
+    if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt)) == SOCKET_ERROR) {
+        printf("Setsockopt falhou: %d\n", WSAGetLastError());
+        closesocket(server);
+        WSACleanup();
+        return 1;
     }
 
     // Anexar socket à porta
-    setsockopt(server, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt));
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
     // Vincular o socket
-    if (bind(server, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("Bind falhou");
-        exit(EXIT_FAILURE);
+    if (bind(server, (struct sockaddr *)&address, sizeof(address)) == SOCKET_ERROR) {
+        printf("Bind falhou: %d\n", WSAGetLastError());
+        closesocket(server);
+        WSACleanup();
+        return 1;
     }
 
     //Ouvir conexões
-    if (listen(server, 3) < 0) {
-        perror("Listen falhou");
-        exit(EXIT_FAILURE);
+    if (listen(server, 3) == SOCKET_ERROR) {
+        printf("Listen falhou: %d\n", WSAGetLastError());
+        closesocket(server);
+        WSACleanup();
+        return 1;
     }
+
+    printf("Servidor ouvindo na porta %d...\n", PORT);
 
     // Aceitar conexões
-    socket = accept(server, (struct sockaddr *)&address, (socklen_t *)&addrlen);
-    if (socket < 0) {
-        perror("Accept falhou");
-        exit(EXIT_FAILURE);
+    client = accept(server, (struct sockaddr*)&address, &addrlen);
+    if (client == INVALID_SOCKET) {
+        printf("Accept falhou: %d\n", WSAGetLastError());
+        closesocket(server);
+        WSACleanup();
+        return 1;
     }
 
+    printf("Cliente conectado!\n");
+
     // Receber dados
-    read(socket, buffer, BUFFER_SIZE);
-    std::cout << "Mensagem recebida: " << buffer << std::endl;
+    int bytesReceived = recv(client, buffer, BUFFER_SIZE, 0);
+    if (bytesReceived > 0) {
+        printf("Mensagem recebida: %s\n", buffer);
+        
+        // ENVIAR RESPOSTA (opcional)
+        const char* response = "Mensagem recebida pelo servidor!";
+        send(client, response, strlen(response), 0);
+    } else if (bytesReceived == 0) {
+        printf("Conexão encerrada pelo cliente.\n");
+    } else {
+        printf("Erro ao receber dados: %d\n", WSAGetLastError());
+    }
 
     // Fechar sockets
     closesocket(socket);
     closesocket(server);
+    WSACleanup();
     return 0;
 }
