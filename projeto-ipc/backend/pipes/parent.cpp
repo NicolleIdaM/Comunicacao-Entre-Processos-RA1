@@ -20,7 +20,7 @@ int main(void) {
     HANDLE ReadHandle, WriteHandle;
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
-    char message[BUFFER_SIZE] = "Olá! Processo 2";
+    char message[BUFFER_SIZE] = {0};
     char childProcess[] = "child.exe";
     DWORD written;
 
