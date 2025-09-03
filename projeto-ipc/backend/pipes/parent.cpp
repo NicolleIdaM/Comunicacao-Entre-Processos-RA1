@@ -7,11 +7,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
+#include <string.h>
 
 /*****************
  * DEFINES *
  *****************/
-#define BUFFER_SIZE 25
+#define BUFFER_SIZE 1024
 
 /*****************
  * MAIN FUNCTION *
@@ -25,6 +26,15 @@ int main(void) {
     DWORD written;
 
     SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+
+    //Ler mensagem do Tkinter
+    if (fgets(message, BUFFER_SIZE, stdin) == NULL) {
+        fprintf(stderr, "Erro ao ler mensagem do stdin\n");
+        return 1;
+    }
+
+    //Remover quebra de linha do final
+    message[strcspn(message, "\n")] = '\0';
 
     // Criando o pipe
     if (!CreatePipe(&ReadHandle, &WriteHandle, &sa, 0)) {
@@ -42,9 +52,6 @@ int main(void) {
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     si.dwFlags = STARTF_USESTDHANDLES;
 
-    // Processo filho não herda o handle de escrita
-    SetHandleInformation(WriteHandle, HANDLE_FLAG_INHERIT, 0);
-
     // Criando o processo filho
     if (!CreateProcessA(NULL, childProcess, NULL, NULL, 
                       TRUE, 0, NULL, NULL, &si, &pi)) {
@@ -58,7 +65,7 @@ int main(void) {
     CloseHandle(ReadHandle);
     
     // Escrevendo a mensagem no pipe
-    if(!WriteFile(WriteHandle, message, BUFFER_SIZE, &written, NULL)) {
+    if(!WriteFile(WriteHandle, message, strlen(message) + 1, &written, NULL)) {
         fprintf(stderr, "Erro na escrita do pipe.");
     }
 
