@@ -1,82 +1,43 @@
-/*****************
- * INCLUDES *
-*****************/
-#undef UNICODE
-#undef _UNICODE
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 #include <string.h>
 
-/*****************
- * DEFINES *
- *****************/
 #define BUFFER_SIZE 1024
 
-/*****************
- * MAIN FUNCTION *
- *****************/
-int main(void) {
-    HANDLE ReadHandle, WriteHandle;
-    STARTUPINFO si;
-    PROCESS_INFORMATION pi;
-    char message[BUFFER_SIZE] = {0};
-    char childProcess[] = "child.exe";
-    DWORD written;
-
-    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
-
-    //Ler mensagem do Tkinter
-    if (fgets(message, BUFFER_SIZE, stdin) == NULL) {
-        fprintf(stderr, "Erro ao ler mensagem do stdin\n");
-        return 1;
-    }
-
-    //Remover quebra de linha do final
-    message[strcspn(message, "\n")] = '\0';
-
-    // Criando o pipe
-    if (!CreatePipe(&ReadHandle, &WriteHandle, &sa, 0)) {
-        fprintf(stderr, "Falha na criaçã do Pipe");
-        return 1;
-    }
-
-    // Configurar a estrutura STARTUPINFO do processo filho
-    ZeroMemory(&si, sizeof(STARTUPINFO));
-    si.cb = sizeof(STARTUPINFO);
-
-    // Redirecionando os handles padrão do processo filho
-    si.hStdInput = ReadHandle;
-    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    si.dwFlags = STARTF_USESTDHANDLES;
-
-    // Criando o processo filho
-    if (!CreateProcessA(NULL, childProcess, NULL, NULL, 
-                      TRUE, 0, NULL, NULL, &si, &pi)) {
-        fprintf(stderr, "CreateProcess Falhou");
-        CloseHandle(ReadHandle);
-        CloseHandle(WriteHandle);
+int main() {
+    HANDLE hReadPipe, hWritePipe;
+    SECURITY_ATTRIBUTES sa;
+    char buffer[BUFFER_SIZE];
+    DWORD bytesRead;
+    
+    // Configurar segurança para o pipe
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+    
+    // Criar o pipe
+    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+        printf("{\"type\":\"error\",\"message\":\"Failed to create pipe\"}");
         return 1;
     }
     
-    // Fechar o handle de leitura no processo pai
-    CloseHandle(ReadHandle);
-    
-    // Escrevendo a mensagem no pipe
-    if(!WriteFile(WriteHandle, message, strlen(message) + 1, &written, NULL)) {
-        fprintf(stderr, "Erro na escrita do pipe.");
-    }
-
-    // SAÍDA EM JSON TAMBÉM NO PROCESSO PAI - PARA O FRONTEND
-    printf("{Processo 1 enviou: \"%s\"}\n", message);
+    // Informar ao frontend que estamos prontos
+    printf("{\"type\":\"pipe\",\"status\":\"ready\",\"pid\":%lu}", GetCurrentProcessId()); // CORRIGIDO: %d → %lu
     fflush(stdout);
-
-    // Fechar todos os handles
-    CloseHandle(WriteHandle);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-
+    
+    // Loop principal para ler do pipe
+    while (1) {
+        if (ReadFile(hReadPipe, buffer, BUFFER_SIZE - 1, &bytesRead, NULL) && bytesRead > 0) {
+            buffer[bytesRead] = '\0';
+            // Enviar mensagem recebida para o frontend
+            printf("{\"type\":\"pipe\",\"direction\":\"received\",\"message\":\"%s\"}", buffer);
+            fflush(stdout);
+        }
+        Sleep(100); // Pequena pausa para não sobrecarregar o CPU
+    }
+    
+    CloseHandle(hReadPipe);
+    CloseHandle(hWritePipe);
     return 0;
 }
