@@ -69,7 +69,7 @@ int main(int argc, char* argv[]) {
     fflush(stdout);
 
     // Send data
-    int bytesSent = send(sock, message.c_str(), message.length(), 0);
+    int bytesSent = send(sock, message.c_str(), (int)message.length(), 0);
     if (bytesSent == SOCKET_ERROR) {
         printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"send\", \"code\": %d}\n", WSAGetLastError());
     } else {

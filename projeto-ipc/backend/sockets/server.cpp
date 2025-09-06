@@ -18,7 +18,7 @@
 /*****************
  * MAIN FUNCTION *
  *****************/
-int main() {  // Removidos os parâmetros não utilizados
+int main() {
     WSADATA wsaData;
     SOCKET server_fd, new_socket;
     struct sockaddr_in address;
@@ -93,7 +93,7 @@ int main() {  // Removidos os parâmetros não utilizados
         // Enviar resposta
         std::string response = "Mensagem recebida: ";
         response += buffer;
-        int bytesSent = send(new_socket, response.c_str(), response.length(), 0);
+        int bytesSent = send(new_socket, response.c_str(), (int)response.length(), 0);
         if (bytesSent == SOCKET_ERROR) {
             printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"send\", \"code\": %d}\n", WSAGetLastError());
         } else {
