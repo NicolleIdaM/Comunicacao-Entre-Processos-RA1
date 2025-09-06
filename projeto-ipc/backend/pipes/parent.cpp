@@ -18,12 +18,12 @@ int main() {
     
     // Criar o pipe
     if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
-        printf("{\"type\":\"error\",\"message\":\"Failed to create pipe\"}");
+        printf("{\"mechanism\":\"pipe\",\"action\":\"error\",\"type\":\"create_pipe\"}\n");
         return 1;
     }
     
-    // Informar ao frontend que estamos prontos
-    printf("{\"type\":\"pipe\",\"status\":\"ready\",\"pid\":%lu}", GetCurrentProcessId()); // CORRIGIDO: %d → %lu
+    // Informar ao frontend que o servidor pipe está pronto
+    printf("{\"mechanism\":\"pipe\",\"action\":\"listening\"}\n");
     fflush(stdout);
     
     // Loop principal para ler do pipe
@@ -31,10 +31,10 @@ int main() {
         if (ReadFile(hReadPipe, buffer, BUFFER_SIZE - 1, &bytesRead, NULL) && bytesRead > 0) {
             buffer[bytesRead] = '\0';
             // Enviar mensagem recebida para o frontend
-            printf("{\"type\":\"pipe\",\"direction\":\"received\",\"message\":\"%s\"}", buffer);
+            printf("{\"mechanism\":\"pipe\",\"action\":\"received\",\"data\":\"%s\",\"bytes\":%lu}\n", buffer, bytesRead);
             fflush(stdout);
         }
-        Sleep(100); // Pequena pausa para não sobrecarregar o CPU
+        Sleep(100); // Evitar consumo excessivo de CPU
     }
     
     CloseHandle(hReadPipe);
