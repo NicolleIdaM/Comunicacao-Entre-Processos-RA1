@@ -19,7 +19,7 @@ class IPCApp:
         self.socket_process = None
         self.pipes_process = None
 
-        # Garante que o cwd é a pasta do script
+        # Garante que o cwd é o da pasta do script
         script_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(script_dir)
 
@@ -160,8 +160,10 @@ class IPCApp:
     # ========== SHARED MEMORY METHODS ==========
     def start_shared_memory(self):
         try:
+            # Cleanup inicial
             self.run_shared_memory_command("cleanup")
             
+            # Inicializa memória compartilhada
             init_proc = self.run_shared_memory_command("init")
             return_code = init_proc.wait()
             
@@ -169,6 +171,7 @@ class IPCApp:
                 self.shared_memory_status.set("Memória: Inicializada ✓")
                 self.add_to_log("✅ Memória compartilhada inicializada com sucesso")
                 
+                # Inicia o reader em background
                 self.shared_memory_processes['reader'] = self.run_shared_memory_command("reader")
                 threading.Thread(target=self.read_shared_memory_output, 
                                 args=(self.shared_memory_processes['reader'],), 
@@ -177,6 +180,7 @@ class IPCApp:
                 self.start_button.config(state=DISABLED)
                 self.stop_button.config(state=NORMAL)
                 self.status_var.set("Memória compartilhada inicializada e reader ativo")
+                
             else:
                 messagebox.showerror("Erro", "Falha ao inicializar memória compartilhada")
                 
@@ -185,6 +189,7 @@ class IPCApp:
 
     def stop_shared_memory(self):
         try:
+            # Para o reader
             if 'reader' in self.shared_memory_processes:
                 self.shared_memory_processes['reader'].terminate()
                 try: 
@@ -193,6 +198,7 @@ class IPCApp:
                     self.shared_memory_processes['reader'].kill()
                 del self.shared_memory_processes['reader']
             
+            # Cleanup
             self.run_shared_memory_command("cleanup")
             self.shared_memory_status.set("Memória: Não inicializada")
             
@@ -205,14 +211,13 @@ class IPCApp:
             messagebox.showerror("Erro", f"Falha ao parar memória compartilhada: {str(e)}")
 
     def run_shared_memory_command(self, command):
-        backend_dir = os.path.join("..", "backend", "shared_memory", "output")
+        backend_dir = os.path.join("..", "backend", "shared_memory")
         exe_path = os.path.abspath(os.path.join(backend_dir, "shared_memory.exe"))
         
         if not os.path.exists(exe_path):
             raise FileNotFoundError(f"Executável não encontrado: {exe_path}")
         
         return subprocess.Popen([exe_path, command], 
-                               stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE,
                                text=True, 
@@ -232,6 +237,7 @@ class IPCApp:
         try:
             if not raw.strip():
                 return
+                
             data = json.loads(raw)
             event = data.get('event', '')
             detail = data.get('detail', '')
@@ -252,38 +258,234 @@ class IPCApp:
                 self.add_to_log("✅ [SHM] Cleanup realizado")
             else:
                 self.add_to_log(f"ℹ️ [SHM] {event}: {detail}")
+                
         except json.JSONDecodeError:
             self.add_to_log(f"📄 [SHM] Saída: {raw}")
 
     def send_shared_memory_message(self, message):
         try:
             proc = self.run_shared_memory_command("writer")
+            
+            # Envia a mensagem para o stdin do writer
             proc.stdin.write(message + "\n")
             proc.stdin.flush()
             proc.stdin.close()
+            
+            # Lê a saída para verificar se foi enviado
             out, err = proc.communicate()
+            
             if out:
                 self.process_shared_memory_data(out.strip())
             if err:
                 self.add_to_log(f"⚠️ [SHM] Erro no writer: {err}")
+                
             self.add_to_log(f"📤 [SHM] Mensagem enviada: '{message}'")
             self.message_entry.delete(0, END)
+            
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao enviar mensagem: {str(e)}")
             self.add_to_log(f"❌ ERRO ao enviar mensagem: {str(e)}")
 
-    # ========== SOCKETS METHODS (sem mudanças) ==========
-    # ... (mantém como no seu arquivo)
+    # ========== SOCKETS METHODS ==========
+    def start_socket_server(self):
+        try:
+            ipc = "sockets"
+            backend = os.path.join("..", "backend", ipc, "output")
+            server_exe = os.path.abspath(os.path.join(backend, "server.exe"))
 
-    # ========== PIPES METHODS (sem mudanças) ==========
-    # ... (mantém como no seu arquivo)
+            if not os.path.exists(server_exe):
+                messagebox.showerror("Erro", f"Executável do servidor não encontrado: {server_exe}")
+                self.add_to_log(f"❌ ERRO: Executável não encontrado: {server_exe}")
+                return
+
+            self.socket_process = subprocess.Popen([server_exe], stdout=subprocess.PIPE,
+                                                   stderr=subprocess.PIPE, text=True, bufsize=1,
+                                                   universal_newlines=True)
+            threading.Thread(target=self.read_socket_output,
+                             args=(self.socket_process,), daemon=True).start()
+            self.start_button.config(state=DISABLED)
+            self.stop_button.config(state=NORMAL)
+            self.status_var.set(f"Servidor {ipc} iniciado")
+            self.add_to_log(f"✅ Servidor {ipc} iniciado")
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao iniciar servidor: {e}")
+            self.add_to_log(f"❌ ERRO ao iniciar servidor: {e}")
+
+    def stop_socket_server(self):
+        if self.socket_process:
+            self.socket_process.terminate()
+            try: 
+                self.socket_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.socket_process.kill()
+            self.socket_process = None
+            
+        self.start_button.config(state=NORMAL)
+        self.stop_button.config(state=DISABLED)
+        self.status_var.set("Servidor sockets parado")
+        self.add_to_log("🛑 Servidor sockets parado")
+
+    def read_socket_output(self, proc):
+        while proc.poll() is None:
+            out = proc.stdout.readline()
+            if out:
+                self.root.after(0, lambda o=out.strip(): self.process_socket_data(o))
+
+    def process_socket_data(self, raw):
+        try:
+            data = json.loads(raw)
+            action = data.get('action', '')
+            mech = data.get('mechanism', '').upper()
+            msg = data.get('data', '')
+            
+            if action == 'received':
+                self.add_to_log(f"📥 [{mech}] Recebido: {msg}")
+            elif action == 'sent':
+                self.add_to_log(f"📤 [{mech}] Enviado: {msg}")
+            elif action == 'connected':
+                self.add_to_log(f"✅ [{mech}] Cliente conectado")
+            elif action == 'error':
+                self.add_to_log(f"❌ [{mech}] Erro: {data.get('type')} - código {data.get('code')}")
+            else:
+                self.add_to_log(f"ℹ️ [{mech}] Ação: {action}")
+                
+        except json.JSONDecodeError:
+            if raw.strip():
+                self.add_to_log(f"📄 [SOCKETS] Saída: {raw}")
+
+    def send_socket_message(self, message):
+        try:
+            ipc = "sockets"
+            backend = os.path.join("..", "backend", ipc, "output")
+            client_exe = os.path.abspath(os.path.join(backend, "client.exe"))
+
+            if not os.path.exists(client_exe):
+                messagebox.showerror("Erro", f"Executável do cliente não encontrado: {client_exe}")
+                self.add_to_log(f"❌ ERRO: Executável não encontrado: {client_exe}")
+                return
+
+            threading.Thread(target=self.run_socket_client, args=([client_exe, message],), daemon=True).start()
+            self.add_to_log(f"📤 [{ipc.upper()}] Enviado via Cliente: {message}")
+            self.message_entry.delete(0, END)
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao enviar mensagem via cliente: {e}")
+            self.add_to_log(f"❌ ERRO ao enviar mensagem: {e}")
+
+    def run_socket_client(self, args):
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, bufsize=1, universal_newlines=True)
+        out, err = proc.communicate()
+        if out:
+            self.root.after(0, lambda: self.process_socket_data(out.strip()))
+        if err:
+            self.root.after(0, lambda: self.add_to_log(f"⚠️ Erro do cliente: {err}"))
+
+    # ========== PIPES METHODS ==========
+    def start_pipes_server(self):
+        try:
+            ipc = "pipes"
+            backend = os.path.join("..", "backend", ipc, "output")
+            server_exe = os.path.abspath(os.path.join(backend, "parent.exe"))
+
+            if not os.path.exists(server_exe):
+                messagebox.showerror("Erro", f"Executável do servidor não encontrado: {server_exe}")
+                self.add_to_log(f"❌ ERRO: Executável não encontrado: {server_exe}")
+                return
+
+            self.pipes_process = subprocess.Popen([server_exe], stdout=subprocess.PIPE,
+                                                  stderr=subprocess.PIPE, text=True, bufsize=1,
+                                                  universal_newlines=True)
+            threading.Thread(target=self.read_pipes_output,
+                             args=(self.pipes_process,), daemon=True).start()
+            self.start_button.config(state=DISABLED)
+            self.stop_button.config(state=NORMAL)
+            self.status_var.set(f"Servidor {ipc} iniciado")
+            self.add_to_log(f"✅ Servidor {ipc} iniciado")
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao iniciar servidor: {e}")
+            self.add_to_log(f"❌ ERRO ao iniciar servidor: {e}")
+
+    def stop_pipes_server(self):
+        if self.pipes_process:
+            self.pipes_process.terminate()
+            try: 
+                self.pipes_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.pipes_process.kill()
+            self.pipes_process = None
+            
+        self.start_button.config(state=NORMAL)
+        self.stop_button.config(state=DISABLED)
+        self.status_var.set("Servidor pipes parado")
+        self.add_to_log("🛑 Servidor pipes parado")
+
+    def read_pipes_output(self, proc):
+        while proc.poll() is None:
+            out = proc.stdout.readline()
+            if out:
+                self.root.after(0, lambda o=out.strip(): self.process_pipes_data(o))
+
+    def process_pipes_data(self, raw):
+        try:
+            data = json.loads(raw)
+            action = data.get('action', '')
+            mech = data.get('mechanism', '').upper()
+            msg = data.get('data', '')
+            
+            if action == 'received':
+                self.add_to_log(f"📥 [{mech}] Recebido: {msg}")
+            elif action == 'sent':
+                self.add_to_log(f"📤 [{mech}] Enviado: {msg}")
+            elif action == 'connected':
+                self.add_to_log(f"✅ [{mech}] Cliente conectado")
+            elif action == 'error':
+                self.add_to_log(f"❌ [{mech}] Erro: {data.get('type')} - código {data.get('code')}")
+            else:
+                self.add_to_log(f"ℹ️ [{mech}] Ação: {action}")
+                
+        except json.JSONDecodeError:
+            if raw.strip():
+                self.add_to_log(f"📄 [PIPES] Saída: {raw}")
+
+    def send_pipes_message(self, message):
+        try:
+            ipc = "pipes"
+            backend = os.path.join("..", "backend", ipc, "output")
+            client_exe = os.path.abspath(os.path.join(backend, "child.exe"))
+
+            if not os.path.exists(client_exe):
+                messagebox.showerror("Erro", f"Executável do cliente não encontrado: {client_exe}")
+                self.add_to_log(f"❌ ERRO: Executável não encontrado: {client_exe}")
+                return
+
+            threading.Thread(target=self.run_pipes_client, args=([client_exe, message],), daemon=True).start()
+            self.add_to_log(f"📤 [{ipc.upper()}] Enviado via Cliente: {message}")
+            self.message_entry.delete(0, END)
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao enviar mensagem via cliente: {e}")
+            self.add_to_log(f"❌ ERRO ao enviar mensagem: {e}")
+
+    def run_pipes_client(self, args):
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, bufsize=1, universal_newlines=True)
+        out, err = proc.communicate()
+        if out:
+            self.root.after(0, lambda: self.process_pipes_data(out.strip()))
+        if err:
+            self.root.after(0, lambda: self.add_to_log(f"⚠️ Erro do cliente: {err}"))
 
     # ========== SEND MESSAGE DISPATCHER ==========
     def send_message(self, event=None):
         msg = self.message_entry.get().strip()
         if not msg:
             return
+            
         ipc_type = self.current_ipc_type.get()
+        
         if ipc_type == "shared_memory":
             self.send_shared_memory_message(msg)
         elif ipc_type == "sockets":
@@ -294,10 +496,13 @@ class IPCApp:
 def main():
     root = Tk()
     app = IPCApp(root)
+    
+    # Centraliza a janela
     root.update_idletasks()
     x = (root.winfo_screenwidth() // 2) - (900 // 2)
     y = (root.winfo_screenheight() // 2) - (650 // 2)
     root.geometry(f"900x650+{x}+{y}")
+    
     root.mainloop()
 
 if __name__ == "__main__":
