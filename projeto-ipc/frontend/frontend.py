@@ -19,6 +19,7 @@ class IPCApp:
         self.server_process = None
         self.client_processes = []
         self.server_running = False
+        self.current_server_type = None  # Para controlar qual IPC está rodando
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(script_dir)
@@ -71,6 +72,10 @@ class IPCApp:
         self.stop_button = ttk.Button(button_frame, text="Parar Servidor", command=self.stop_server, state=DISABLED)
         self.stop_button.pack(side=LEFT, padx=5)
 
+        # Botão para limpar log
+        self.clear_button = ttk.Button(button_frame, text="Limpar Log", command=self.clear_log)
+        self.clear_button.pack(side=LEFT, padx=5)
+
         # Status do executável
         self.exe_status = ttk.Label(button_frame, text="", style='Error.TLabel')
         self.exe_status.pack(side=LEFT, padx=10)
@@ -81,7 +86,7 @@ class IPCApp:
         self.message_entry.grid(row=2, column=1, sticky=(W, E), pady=5)
         self.message_entry.bind('<Return>', self.send_message)
 
-        self.send_button = ttk.Button(main_frame, text="Enviar via Cliente", command=self.send_message)
+        self.send_button = ttk.Button(main_frame, text="Enviar via Cliente", command=self.send_message, state=DISABLED)
         self.send_button.grid(row=2, column=2, padx=5)
 
         # Frame de visualização
@@ -102,10 +107,22 @@ class IPCApp:
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=SUNKEN, anchor=W)
         status_bar.grid(row=1, column=0, sticky=(W, E))
 
+    def clear_log(self):
+        self.log_area.config(state=NORMAL)
+        self.log_area.delete(1.0, END)
+        self.log_area.config(state=DISABLED)
+        self.add_to_log("Log limpo")
+
     def check_executables(self):
         self.set_ipc_type(self.current_ipc_type.get())
 
     def set_ipc_type(self, ipc_type):
+        # Se já tem um servidor rodando de outro tipo, não permite mudar
+        if self.server_running and ipc_type != self.current_server_type:
+            messagebox.showwarning("Aviso", 
+                f"Pare o servidor {self.current_server_type} primeiro antes de mudar para {ipc_type}")
+            return
+            
         self.current_ipc_type.set(ipc_type)
         self.highlight_selected_button()
         self.update_visualization()
@@ -202,9 +219,14 @@ class IPCApp:
                 server_exe = os.path.abspath(os.path.join(backend, "shared_memory.exe"))
                 # Primeiro inicializa a memória compartilhada
                 init_args = [server_exe, "init"]
-                init_process = subprocess.run(init_args, capture_output=True, text=True, timeout=5)
-                if init_process.returncode != 0:
-                    raise Exception(f"Erro na inicialização: {init_process.stderr}")
+                try:
+                    init_process = subprocess.run(init_args, capture_output=True, text=True, timeout=5)
+                    if init_process.returncode != 0:
+                        error_msg = init_process.stderr if init_process.stderr else "Erro desconhecido na inicialização"
+                        raise Exception(f"Erro na inicialização: {error_msg}")
+                except FileNotFoundError:
+                    raise Exception("Executável não encontrado. Execute compile.bat primeiro!")
+                
                 args = [server_exe, "reader"]
 
             # Verificar se o executável existe
@@ -218,10 +240,12 @@ class IPCApp:
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             
             self.server_running = True
+            self.current_server_type = ipc
             threading.Thread(target=self.read_server_output, daemon=True).start()
             
             self.start_button.config(state=DISABLED)
@@ -231,8 +255,13 @@ class IPCApp:
             self.add_to_log(f"Servidor {ipc} iniciado")
             self.update_visualization("running")
             
-        except FileNotFoundError as e:
-            messagebox.showerror("Erro", f"Executável não encontrado.\n\nExecute os arquivos compile.bat nas pastas do backend.")
+        except FileNotFoundError:
+            messagebox.showerror("Erro", 
+                "Executável não encontrado.\n\n"
+                "Execute os arquivos compile.bat nas pastas do backend:\n"
+                "1. backend\\pipes\\compile.bat\n"
+                "2. backend\\sockets\\compile.bat\n" 
+                "3. backend\\shared_memory\\compile.bat")
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao iniciar servidor: {str(e)}")
             self.add_to_log(f"ERRO: {str(e)}")
@@ -243,14 +272,19 @@ class IPCApp:
             
         try:
             if self.server_process:
+                # Tentar terminar gracefulmente
                 self.server_process.terminate()
                 try:
                     self.server_process.wait(timeout=2)
-                except:
+                except subprocess.TimeoutExpired:
+                    # Forçar término se não responder
                     self.server_process.kill()
-                self.server_process = None
+                    self.server_process.wait(timeout=1)
                 
             self.server_running = False
+            self.current_server_type = None
+            self.server_process = None
+            
             self.start_button.config(state=NORMAL)
             self.stop_button.config(state=DISABLED)
             self.send_button.config(state=DISABLED)
@@ -262,25 +296,31 @@ class IPCApp:
             self.add_to_log(f"Erro ao parar servidor: {e}")
 
     def read_server_output(self):
-        while self.server_running and self.server_process and self.server_process.poll() is None:
+        while self.server_running and self.server_process:
             try:
                 # Ler stdout
-                line = self.server_process.stdout.readline()
-                if line:
-                    self.process_backend_data(line.strip())
+                if self.server_process.stdout:
+                    line = self.server_process.stdout.readline()
+                    if line:
+                        self.process_backend_data(line.strip())
                 
                 # Ler stderr
-                err_line = self.server_process.stderr.readline()
-                if err_line:
-                    self.add_to_log(f"ERRO: {err_line.strip()}")
+                if self.server_process and self.server_process.stderr:
+                    err_line = self.server_process.stderr.readline()
+                    if err_line and err_line.strip():
+                        self.add_to_log(f"ERRO: {err_line.strip()}")
+                        
+                # Pequena pausa para não sobrecarregar
+                time.sleep(0.1)
                     
             except Exception as e:
-                self.add_to_log(f"Erro na leitura do servidor: {e}")
+                if self.server_running:  # Só logar se ainda deveria estar rodando
+                    self.add_to_log(f"Erro na leitura do servidor: {e}")
                 break
 
     def process_backend_data(self, data):
         try:
-            if not data.strip():
+            if not data or not data.strip():
                 return
                 
             # Tentar parsear como JSON
@@ -302,7 +342,8 @@ class IPCApp:
                     
             except json.JSONDecodeError:
                 # Se não for JSON, mostrar como texto simples
-                self.add_to_log(f"Saída: {data}")
+                if data.strip() and not data.startswith('{') and not data.startswith('['):
+                    self.add_to_log(f"Saída: {data}")
                 
         except Exception as e:
             self.add_to_log(f"Erro ao processar dados: {e}")
@@ -310,6 +351,14 @@ class IPCApp:
     def send_message(self, event=None):
         if not self.server_running:
             messagebox.showwarning("Aviso", "O servidor não está em execução. Inicie o servidor primeiro.")
+            return
+            
+        # Verificar se está tentando enviar para o IPC correto
+        if self.current_ipc_type.get() != self.current_server_type:
+            messagebox.showwarning("Aviso", 
+                f"Você está tentando enviar para {self.current_ipc_type.get()}, "
+                f"mas o servidor ativo é {self.current_server_type}. "
+                "Pare o servidor atual primeiro.")
             return
             
         msg = self.message_entry.get().strip()
@@ -346,7 +395,8 @@ class IPCApp:
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1,
-                    universal_newlines=True
+                    universal_newlines=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 proc.stdin.write(msg + "\n")
                 proc.stdin.flush()
@@ -357,7 +407,8 @@ class IPCApp:
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1,
-                    universal_newlines=True
+                    universal_newlines=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
 
             threading.Thread(target=self.read_client_output, args=(proc,), daemon=True).start()
@@ -383,7 +434,8 @@ class IPCApp:
                         self.root.after(0, lambda l=line.strip(): self.add_to_log(f"ERRO Cliente: {l}"))
                         
         except subprocess.TimeoutExpired:
-            proc.kill()
+            if proc:
+                proc.kill()
             self.add_to_log("Timeout no cliente")
         except Exception as e:
             self.add_to_log(f"Erro no cliente: {e}")
