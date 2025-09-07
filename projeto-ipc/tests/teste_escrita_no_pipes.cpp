@@ -26,7 +26,7 @@ int main() {
         return 1;
     }
     
-    printf("{\"teste\":\"escrita_pipe\",\"status\":\"sucesso\",\"bytes\":%lu,\"menssagem\":\"%s\"}\n", bytesWritten, teste);
+    printf("{\"teste\":\"escrita_pipe\",\"status\":\"sucesso\",\"bytes\":%lu,\"mensagem\":\"%s\"}\n", bytesWritten, teste);
     
     CloseHandle(hReadPipe);
     CloseHandle(hWritePipe);
