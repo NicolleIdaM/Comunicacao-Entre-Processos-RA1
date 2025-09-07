@@ -9,7 +9,7 @@ int main() {
     SECURITY_ATTRIBUTES sa;
     char buffer[BUFFER_SIZE];
     DWORD bytesRead;
-    const char* testMessage = "Teste de leitura no pipe";
+    const char* teste = "Teste de leitura no pipe";
     
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.bInheritHandle = TRUE;
@@ -22,7 +22,7 @@ int main() {
     
     // Primeiro escrever para ter dados para ler
     DWORD bytesWritten;
-    if (!WriteFile(hWritePipe, testMessage, strlen(testMessage) + 1, &bytesWritten, NULL)) {
+    if (!WriteFile(hWritePipe, teste, strlen(teste) + 1, &bytesWritten, NULL)) {
         printf("{\"teste\":\"leitura_pipes\",\"status\":\"erro\",\"tipo\":\"escrita\",\"code\":%d}\n", GetLastError());
         CloseHandle(hReadPipe);
         CloseHandle(hWritePipe);
