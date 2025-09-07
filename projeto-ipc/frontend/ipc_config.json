@@ -1,5 +1,7 @@
 {
   "PIPE_SRV": "c:\\Users\\nicolle ida\\Downloads\\SO\\Comunicacao-Entre-Processos-RA1\\projeto-ipc\\backend\\pipes\\output\\parent.exe",
   "PIPE_CLI": "c:\\Users\\nicolle ida\\Downloads\\SO\\Comunicacao-Entre-Processos-RA1\\projeto-ipc\\backend\\pipes\\output\\child.exe",
-  "SHM_EXE": "c:\\Users\\nicolle ida\\Downloads\\SO\\Comunicacao-Entre-Processos-RA1\\projeto-ipc\\backend\\shared_memory\\output\\shared_memory.exe"
+  "SHM_EXE": "c:\\Users\\nicolle ida\\Downloads\\SO\\Comunicacao-Entre-Processos-RA1\\projeto-ipc\\backend\\shared_memory\\output\\shared_memory.exe",
+  "SOCK_SRV": "c:\\Users\\nicolle ida\\Downloads\\SO\\Comunicacao-Entre-Processos-RA1\\projeto-ipc\\backend\\sockets\\output\\server.exe",
+  "SOCK_CLI": "c:\\Users\\nicolle ida\\Downloads\\SO\\Comunicacao-Entre-Processos-RA1\\projeto-ipc\\backend\\sockets\\output\\client.exe"
 }
