@@ -1,26 +1,33 @@
-# ipc_frontend_sockets_fixed.py
-import os, sys, subprocess, threading, json, time
+import os
+import sys
+import subprocess
+import threading
+import json
 from tkinter import *
 from tkinter import ttk, scrolledtext, messagebox, filedialog
+import time
 
-BASE = os.path.abspath(os.path.dirname(__file__))
-CFG  = os.path.join(BASE, "ipc_config.json")
-
-def load_cfg():
+# Carregar configurações
+def load_config():
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ipc_config.json")
     try:
-        import json
-        with open(CFG, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {}
-def save_cfg(d):
-    try:
-        import json
-        with open(CFG, "w", encoding="utf-8") as f: json.dump(d, f, ensure_ascii=False, indent=2)
-    except: pass
+        with open(config_file, 'r') as f:
+            return json.load(f)
+    except:
+        return {}
 
-cfg = load_cfg()
+def save_config(config):
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ipc_config.json")
+    try:
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+    except:
+        pass
+
+config = load_config()
 
 def candidates(subdir, *names):
-    root = os.path.abspath(os.path.join(BASE, "..", "backend", subdir))
+    root = os.path.abspath(os.path.join("..", "backend", subdir))
     outs = []
     for n in names:
         outs += [
@@ -37,213 +44,428 @@ def candidates(subdir, *names):
 
 def find_exe(cfg_key, subdir, *names):
     # 1) salvo
-    p = cfg.get(cfg_key)
+    p = config.get(cfg_key)
     if p and os.path.isfile(p): return p
     # 2) candidatos
     paths, root, names_tuple = candidates(subdir, *names)
     for p in paths:
         if os.path.isfile(p):
-            cfg[cfg_key] = p; save_cfg(cfg); return p
+            config[cfg_key] = p; save_config(config); return p
     # 3) busca recursiva
     for r,_,files in os.walk(root):
         for f in files:
             if f.lower() in [n.lower() for n in names_tuple]:
                 p = os.path.join(r,f)
-                cfg[cfg_key] = p; save_cfg(cfg); return p
+                config[cfg_key] = p; save_config(config); return p
     # 4) diálogo
     p = filedialog.askopenfilename(title=f"Selecione {names[0]}",
                                    initialdir=root, filetypes=[("Executável", "*.exe")])
     if p and os.path.isfile(p):
-        cfg[cfg_key] = p; save_cfg(cfg); return p
+        config[cfg_key] = p; save_config(config); return p
     return None
 
 class IPCApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Comunicação entre Processos - IPC")
-        self.root.geometry("900x650")
+        self.root.geometry("800x600")
 
-        self.current_ipc_type = StringVar(value="sockets")
+        self.setup_styles()
+
+        self.current_ipc_type = StringVar(value="pipes")
         self.server_process = None
         self.server_running = False
+        self.current_server_type = None
 
-        self._build_ui()
-        self._refresh_exec_status()
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        os.chdir(script_dir)
 
-    def _build_ui(self):
-        main = ttk.Frame(self.root, padding=10); main.grid(row=0, column=0, sticky="nsew")
-        self.root.rowconfigure(0, weight=1); self.root.columnconfigure(0, weight=1)
-        for c in range(3): main.columnconfigure(c, weight=1)
-        main.rowconfigure(5, weight=1)
+        self.create_widgets()
+        self.check_executables()
 
-        # seleção
-        ttk.Label(main, text="Selecione o mecanismo de IPC:").grid(row=0, column=0, sticky="w")
-        sel = ttk.Frame(main); sel.grid(row=0, column=1, sticky="w")
-        self.btn_pipes   = ttk.Button(sel, text="Pipes", command=lambda:self.set_ipc("pipes")); self.btn_pipes.pack(side=LEFT, padx=2)
-        self.btn_sockets = ttk.Button(sel, text="Sockets", command=lambda:self.set_ipc("sockets")); self.btn_sockets.pack(side=LEFT, padx=2)
-        self.btn_shm     = ttk.Button(sel, text="Shared Memory", command=lambda:self.set_ipc("shared_memory")); self.btn_shm.pack(side=LEFT, padx=2)
+    def setup_styles(self):
+        style = ttk.Style()
+        style.configure('Selected.TButton', background='#0078D7', foreground='white')
+        style.configure('Disabled.TButton', background='#cccccc')
+        style.configure('Error.TLabel', foreground='red')
+        style.configure('Success.TLabel', foreground='green')
 
-        # controles
-        cframe = ttk.Frame(main); cframe.grid(row=1, column=0, columnspan=3, pady=8, sticky="w")
-        self.btn_start = ttk.Button(cframe, text="Iniciar Servidor", command=self.start_server); self.btn_start.pack(side=LEFT, padx=5)
-        self.btn_stop  = ttk.Button(cframe, text="Parar Servidor", command=self.stop_server, state=DISABLED); self.btn_stop.pack(side=LEFT, padx=5)
-        self.lbl_exec  = ttk.Label(cframe, text=""); self.lbl_exec.pack(side=LEFT, padx=10)
+    def create_widgets(self):
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(N, W, E, S))
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(5, weight=1)
 
-        ttk.Label(main, text="Mensagem:").grid(row=2, column=0, sticky="w")
-        self.ent_msg = ttk.Entry(main); self.ent_msg.grid(row=2, column=1, sticky="ew"); self.ent_msg.bind("<Return>", self.send_message)
-        self.btn_send = ttk.Button(main, text="Enviar via Cliente", command=self.send_message, state=DISABLED)
-        self.btn_send.grid(row=2, column=2, sticky="e")
+        # Seleção de IPC
+        ttk.Label(main_frame, text="Selecione o mecanismo de IPC:")\
+            .grid(row=0, column=0, sticky=W, pady=5)
+        ipc_button_frame = ttk.Frame(main_frame)
+        ipc_button_frame.grid(row=0, column=1, sticky=(W, E), pady=5)
 
-        ttk.Label(main, text="Estado do Mecanismo:").grid(row=3, column=0, sticky="w")
-        self.status_label = ttk.Label(main, text="Servidor parado"); self.status_label.grid(row=3, column=1, columnspan=2, sticky="ew")
+        self.pipes_button = ttk.Button(ipc_button_frame, text="Pipes",
+                                      command=lambda: self.set_ipc_type("pipes"))
+        self.pipes_button.pack(side=LEFT, padx=2)
 
-        ttk.Label(main, text="Log de Comunicação:").grid(row=4, column=0, sticky="w", pady=(10,0))
-        self.log = scrolledtext.ScrolledText(main, height=24, state=DISABLED); self.log.grid(row=5, column=0, columnspan=3, sticky="nsew")
+        self.sockets_button = ttk.Button(ipc_button_frame, text="Sockets",
+                                         command=lambda: self.set_ipc_type("sockets"))
+        self.sockets_button.pack(side=LEFT, padx=2)
 
-    def _log(self, s):
-        self.log.config(state=NORMAL); self.log.insert(END, f"{time.strftime('%H:%M:%S')} - {s}\n")
-        self.log.see(END); self.log.config(state=DISABLED)
+        self.shared_memory_button = ttk.Button(ipc_button_frame, text="Shared Memory",
+                                               command=lambda: self.set_ipc_type("shared_memory"))
+        self.shared_memory_button.pack(side=LEFT, padx=2)
 
-    def set_ipc(self, kind):
-        self.current_ipc_type.set(kind); self._log(f"Mecanismo de IPC alterado para: {kind}")
-        self._refresh_exec_status()
+        self.highlight_selected_button()
 
-    def _refresh_exec_status(self):
-        kind = self.current_ipc_type.get()
-        ok = False
-        if kind == "sockets":
-            self.sock_srv = find_exe("SOCK_SRV", "sockets", "server_socket.exe", "server.exe")
-            self.sock_cli = find_exe("SOCK_CLI", "sockets", "client_socket.exe", "client.exe")
-            ok = bool(self.sock_srv and self.sock_cli)
-        elif kind == "pipes":
-            self.pipe_srv = find_exe("PIPE_SRV", "pipes", "pipe_server_plus.exe", "parent.exe", "pipe_server.exe")
-            self.pipe_cli = find_exe("PIPE_CLI", "pipes", "pipe_writer.exe", "child.exe")
-            ok = bool(self.pipe_srv and self.pipe_cli)
-        elif kind == "shared_memory":
-            self.shm_exe  = find_exe("SHM_EXE", "shared_memory", "shared_memory_portable.exe", "shared_memory.exe")
-            ok = bool(self.shm_exe)
+        # Controles do servidor
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=1, column=0, columnspan=2, pady=10)
 
-        self.lbl_exec.config(text="✓ Executáveis OK" if ok else "✗ Executáveis faltando")
-        self.btn_start.config(state=NORMAL if ok else DISABLED)
-        if not ok: self.btn_send.config(state=DISABLED)
+        self.start_button = ttk.Button(button_frame, text="Iniciar Servidor", command=self.start_server)
+        self.start_button.pack(side=LEFT, padx=5)
 
-    # ---------- servidor ----------
+        self.stop_button = ttk.Button(button_frame, text="Parar Servidor", command=self.stop_server, state=DISABLED)
+        self.stop_button.pack(side=LEFT, padx=5)
+
+        # Botão para limpar log
+        self.clear_button = ttk.Button(button_frame, text="Limpar Log", command=self.clear_log)
+        self.clear_button.pack(side=LEFT, padx=5)
+
+        # Status do executável
+        self.exe_status = ttk.Label(button_frame, text="", style='Error.TLabel')
+        self.exe_status.pack(side=LEFT, padx=10)
+
+        # Entrada de mensagem
+        ttk.Label(main_frame, text="Mensagem:").grid(row=2, column=0, sticky=W, pady=5)
+        self.message_entry = ttk.Entry(main_frame, width=40)
+        self.message_entry.grid(row=2, column=1, sticky=(W, E), pady=5)
+        self.message_entry.bind('<Return>', self.send_message)
+
+        self.send_button = ttk.Button(main_frame, text="Enviar via Cliente", command=self.send_message, state=DISABLED)
+        self.send_button.grid(row=2, column=2, padx=5)
+
+        # Frame de visualização
+        ttk.Label(main_frame, text="Estado do Mecanismo:").grid(row=3, column=0, sticky=NW, pady=5)
+        self.status_frame = ttk.Frame(main_frame, relief=SUNKEN, padding=5)
+        self.status_frame.grid(row=3, column=1, columnspan=2, sticky=(W, E), pady=5)
+        
+        self.status_label = ttk.Label(self.status_frame, text="Selecione um mecanismo e inicie o servidor")
+        self.status_label.pack()
+
+        # Área de log
+        ttk.Label(main_frame, text="Log de Comunicação:").grid(row=4, column=0, sticky=NW, pady=5)
+        self.log_area = scrolledtext.ScrolledText(main_frame, width=70, height=15, state=DISABLED)
+        self.log_area.grid(row=5, column=0, columnspan=3, sticky=(N, W, E, S), pady=5)
+
+        # Barra de status
+        self.status_var = StringVar(value="Pronto")
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=SUNKEN, anchor=W)
+        status_bar.grid(row=1, column=0, sticky=(W, E))
+
+    def clear_log(self):
+        self.log_area.config(state=NORMAL)
+        self.log_area.delete(1.0, END)
+        self.log_area.config(state=DISABLED)
+        self.add_to_log("Log limpo")
+
+    def check_executables(self):
+        self.set_ipc_type(self.current_ipc_type.get())
+
+    def set_ipc_type(self, ipc_type):
+        # Não permite mudar se já tem servidor rodando
+        if self.server_running and ipc_type != self.current_server_type:
+            messagebox.showwarning("Aviso", 
+                f"Pare o servidor {self.current_server_type} primeiro antes de mudar para {ipc_type}")
+            return
+            
+        self.current_ipc_type.set(ipc_type)
+        self.highlight_selected_button()
+        self.update_visualization()
+        self.verify_executables()
+        self.add_to_log(f"Mecanismo de IPC alterado para: {ipc_type}")
+
+    def verify_executables(self):
+        ipc = self.current_ipc_type.get()
+        
+        server_exists = False
+        client_exists = False
+        
+        if ipc == "sockets":
+            self.sock_srv = find_exe("SOCK_SRV", "sockets", "server.exe", "server_socket.exe")
+            self.sock_cli = find_exe("SOCK_CLI", "sockets", "client.exe", "client_socket.exe")
+            server_exists = bool(self.sock_srv)
+            client_exists = bool(self.sock_cli)
+            
+        elif ipc == "pipes":
+            self.pipe_srv = find_exe("PIPE_SRV", "pipes", "parent.exe", "pipe_server.exe")
+            self.pipe_cli = find_exe("PIPE_CLI", "pipes", "child.exe", "pipe_writer.exe")
+            server_exists = bool(self.pipe_srv)
+            client_exists = bool(self.pipe_cli)
+            
+        elif ipc == "shared_memory":
+            self.shm_exe = find_exe("SHM_EXE", "shared_memory", "shared_memory.exe")
+            server_exists = bool(self.shm_exe)
+            client_exists = server_exists
+
+        if server_exists and client_exists:
+            self.exe_status.config(text="✓ Executáveis OK", style='Success.TLabel')
+            self.start_button.config(state=NORMAL)
+        else:
+            self.exe_status.config(text="✗ Executáveis faltando", style='Error.TLabel')
+            self.start_button.config(state=DISABLED)
+            self.send_button.config(state=DISABLED)
+
+    def highlight_selected_button(self):
+        for b in [self.pipes_button, self.sockets_button, self.shared_memory_button]:
+            b.state(['!pressed', '!selected'])
+        cur = self.current_ipc_type.get()
+        if cur == "pipes":
+            self.pipes_button.state(['pressed', 'selected'])
+        elif cur == "sockets":
+            self.sockets_button.state(['pressed', 'selected'])
+        elif cur == "shared_memory":
+            self.shared_memory_button.state(['pressed', 'selected'])
+
+    def update_visualization(self, status="stopped"):
+        ipc_type = self.current_ipc_type.get()
+        
+        if ipc_type == "pipes":
+            if status == "running":
+                self.status_label.config(text="Pipe: Ativo | Buffer: Pronto | Processos: 1+")
+            else:
+                self.status_label.config(text="Pipe: Inativo | Buffer: Vazio | Processos: 0")
+                
+        elif ipc_type == "sockets":
+            if status == "running":
+                self.status_label.config(text="Socket: Escutando | Porta: 8080 | Conexões: 0")
+            else:
+                self.status_label.config(text="Socket: Desconectado | Porta: 8080 | Conexões: 0")
+                
+        elif ipc_type == "shared_memory":
+            if status == "running":
+                self.status_label.config(text="Memória: Ativa | Tamanho: 256B | Semáforos: Ok")
+            else:
+                self.status_label.config(text="Memória: Inativa | Tamanho: 256B | Semáforemos: -")
+
+    def add_to_log(self, msg):
+        self.log_area.config(state=NORMAL)
+        self.log_area.insert(END, f"{time.strftime('%H:%M:%S')} - {msg}\n")
+        self.log_area.see(END)
+        self.log_area.config(state=DISABLED)
+
     def start_server(self):
-        if self.server_running: return
-        kind = self.current_ipc_type.get()
+        if self.server_running:
+            return
+            
+        ipc = self.current_ipc_type.get()
+        
         try:
-            if kind == "sockets":
-                exe = self.sock_srv; args = [exe]
-            elif kind == "pipes":
-                exe = self.pipe_srv; args = [exe]
-            elif kind == "shared_memory":
-                exe = self.shm_exe;  args = [exe, "reader"]
-            else: return
+            if ipc == "sockets":
+                exe = self.sock_srv
+                args = [exe]
+                
+            elif ipc == "pipes":
+                exe = self.pipe_srv
+                args = [exe]
+                
+            elif ipc == "shared_memory":
+                exe = self.shm_exe
+                # Inicializar memória compartilhada primeiro
+                init_args = [exe, "init"]
+                try:
+                    init_process = subprocess.run(init_args, capture_output=True, text=True, timeout=5)
+                    if init_process.returncode != 0:
+                        raise Exception(f"Erro na inicialização: {init_process.stderr}")
+                except:
+                    raise Exception("Erro ao inicializar memória compartilhada")
+                
+                args = [exe, "reader"]
 
-            if not (exe and os.path.isfile(exe)):
+            if not exe or not os.path.exists(exe):
                 raise FileNotFoundError(f"Executável não encontrado: {exe}")
 
-            # referência local evita 'NoneType.stderr'
-            proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, bufsize=1, universal_newlines=True)
-            self.server_process = proc; self.server_running = True
+            # USANDO O MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
+            proc = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            self.server_process = proc
+            self.server_running = True
+            self.current_server_type = ipc
+            
+            # Thread de leitura da primeira versão
             threading.Thread(target=self._reader_thread, args=(proc,), daemon=True).start()
-
-            self.btn_start.config(state=DISABLED); self.btn_stop.config(state=NORMAL); self.btn_send.config(state=NORMAL)
-            self.status_label.config(text=f"Servidor {kind} iniciado")
-            self._log(f"Servidor {kind} iniciado: {exe}")
-
+            
+            self.start_button.config(state=DISABLED)
+            self.stop_button.config(state=NORMAL)
+            self.send_button.config(state=NORMAL)
+            self.status_var.set(f"Servidor {ipc} iniciado")
+            self.add_to_log(f"Servidor {ipc} iniciado")
+            self.update_visualization("running")
+            
         except OSError as e:
-            # 193 -> não é executável válido (caminho errado/arquivo inválido/arquitetura errada)
-            messagebox.showerror("Erro", f"Falha ao iniciar servidor: {e}")
-            self._log(f"ERRO: {e} - verifique se é realmente um .exe (server_socket.exe) do Windows")
+            # Tratamento específico para erro 193
+            if "193" in str(e):
+                messagebox.showerror("Erro", 
+                    "Executável não é válido para Windows.\n\n"
+                    "Execute os arquivos compile.bat nas pastas do backend.")
+            else:
+                messagebox.showerror("Erro", f"Falha ao iniciar servidor: {str(e)}")
+            self.add_to_log(f"ERRO: {str(e)}")
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao iniciar servidor: {e}")
-            self._log(f"ERRO: {e}")
+            messagebox.showerror("Erro", f"Falha ao iniciar servidor: {str(e)}")
+            self.add_to_log(f"ERRO: {str(e)}")
 
     def stop_server(self):
-        if not self.server_running: return
-        p = self.server_process; self.server_running = False; self.server_process = None
+        if not self.server_running:
+            return
+            
         try:
-            if p:
-                p.terminate()
-                try: p.wait(timeout=2)
-                except subprocess.TimeoutExpired: p.kill()
-        finally:
-            self.btn_start.config(state=NORMAL); self.btn_stop.config(state=DISABLED); self.btn_send.config(state=DISABLED)
-            self.status_label.config(text="Servidor parado"); self._log("Servidor parado")
+            if self.server_process:
+                self.server_process.terminate()
+                try:
+                    self.server_process.wait(timeout=2)
+                except:
+                    self.server_process.kill()
+                
+            self.server_running = False
+            self.current_server_type = None
+            self.server_process = None
+            
+            self.start_button.config(state=NORMAL)
+            self.stop_button.config(state=DISABLED)
+            self.send_button.config(state=DISABLED)
+            self.status_var.set("Servidor parado")
+            self.add_to_log("Servidor parado")
+            self.update_visualization("stopped")
+            
+        except Exception as e:
+            self.add_to_log(f"Erro ao parar servidor: {e}")
 
+    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
     def _reader_thread(self, proc):
         try:
             while proc.poll() is None:
                 out = proc.stdout.readline()
-                if out: self._handle_line(out.strip())
+                if out: 
+                    self._handle_line(out.strip())
                 err = proc.stderr.readline()
-                if err: self._log(f"[stderr] {err.strip()}")
-            # dreno final
-            for s in (proc.stdout, proc.stderr):
-                if s:
-                    rest = s.read()
-                    for ln in rest.splitlines():
-                        if ln.strip(): self._handle_line(ln.strip())
+                if err: 
+                    self.add_to_log(f"[stderr] {err.strip()}")
+            # Ler qualquer saída restante
+            for stream in [proc.stdout, proc.stderr]:
+                if stream:
+                    rest = stream.read()
+                    for line in rest.splitlines():
+                        if line.strip(): 
+                            self._handle_line(line.strip())
         except Exception as e:
-            self._log(f"Erro na leitura do servidor: {e}")
+            self.add_to_log(f"Erro na leitura do servidor: {e}")
 
+    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
     def _handle_line(self, data):
-        if not data: return
+        if not data:
+            return
         try:
             obj = json.loads(data)
-            mech = obj.get("mechanism","").upper()
-            act  = obj.get("action","")
-            msg  = obj.get("data","")
-            self._log(f"[{mech}] {act}" + (f": {msg}" if msg else ""))
+            mech = obj.get("mechanism", "").upper()
+            act = obj.get("action", "")
+            msg = obj.get("data", "")
+            self.add_to_log(f"[{mech}] {act}" + (f": {msg}" if msg else ""))
         except json.JSONDecodeError:
-            self._log(data)
+            self.add_to_log(data)
 
-    # ---------- envio ----------
     def send_message(self, event=None):
         if not self.server_running:
-            messagebox.showwarning("Aviso", "Inicie o servidor primeiro."); return
-        msg = self.ent_msg.get().strip()
-        if not msg: return
-        kind = self.current_ipc_type.get()
+            messagebox.showwarning("Aviso", "O servidor não está em execução. Inicie o servidor primeiro.")
+            return
+            
+        # Verificar se está tentando enviar para o IPC correto
+        if self.current_ipc_type.get() != self.current_server_type:
+            messagebox.showwarning("Aviso", 
+                f"Você está tentando enviar para {self.current_ipc_type.get()}, "
+                f"mas o servidor ativo é {self.current_server_type}. "
+                "Pare o servidor atual primeiro.")
+            return
+            
+        msg = self.message_entry.get().strip()
+        if not msg:
+            return
+            
+        ipc = self.current_ipc_type.get()
+        
         try:
-            if kind == "sockets":
-                exe = self.sock_cli; args = [exe, msg]
-            elif kind == "pipes":
-                exe = self.pipe_cli; args = [exe, msg]
-            elif kind == "shared_memory":
-                exe = self.shm_exe;  args = [exe, "writer"]
-            else: return
+            if ipc == "sockets":
+                exe = self.sock_cli
+                args = [exe, msg]
+                
+            elif ipc == "pipes":
+                exe = self.pipe_cli
+                args = [exe, msg]
+                
+            elif ipc == "shared_memory":
+                exe = self.shm_exe
+                args = [exe, "writer"]
 
-            if not (exe and os.path.isfile(exe)):
+            if not exe or not os.path.exists(exe):
                 raise FileNotFoundError(f"Cliente não encontrado: {exe}")
 
-            if kind == "shared_memory":
-                p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     text=True, bufsize=1, universal_newlines=True)
-                p.stdin.write(msg + "\n"); p.stdin.flush(); p.stdin.close()
+            # USANDO O MÉTODO DA PRIMEIRA VERSÃO
+            if ipc == "shared_memory":
+                p = subprocess.Popen(
+                    args,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+                p.stdin.write(msg + "\n")
+                p.stdin.flush()
+                p.stdin.close()
             else:
-                p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     text=True, bufsize=1, universal_newlines=True)
-            threading.Thread(target=self._collect_client, args=(p,kind), daemon=True).start()
-            self._log(f"Enviando mensagem: {msg}"); self.ent_msg.delete(0, END)
-        except OSError as e:
-            messagebox.showerror("Erro", f"Falha ao iniciar cliente: {e}")
-            self._log(f"ERRO cliente: {e}")
-        except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao enviar: {e}")
-            self._log(f"ERRO ao enviar: {e}")
+                p = subprocess.Popen(
+                    args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
 
+            threading.Thread(target=self._collect_client, args=(p, ipc), daemon=True).start()
+            self.add_to_log(f"Enviando mensagem: {msg}")
+            self.message_entry.delete(0, END)
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao enviar mensagem: {str(e)}")
+            self.add_to_log(f"ERRO ao enviar: {str(e)}")
+
+    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
     def _collect_client(self, p, kind):
         try:
             out, err = p.communicate(timeout=10)
             for ln in (out or "").splitlines():
-                if ln.strip(): self._handle_line(ln.strip())
+                if ln.strip(): 
+                    self._handle_line(ln.strip())
             for ln in (err or "").splitlines():
-                if ln.strip(): self._log(f"[{kind} stderr] {ln.strip()}")
+                if ln.strip(): 
+                    self.add_to_log(f"[{kind} stderr] {ln.strip()}")
         except subprocess.TimeoutExpired:
-            p.kill(); self._log("Timeout no cliente")
+            p.kill()
+            self.add_to_log("Timeout no cliente")
+
+def main():
+    root = Tk()
+    app = IPCApp(root)
+    root.mainloop()
 
 if __name__ == "__main__":
-    root = Tk(); app = IPCApp(root); root.mainloop()
+    main()
