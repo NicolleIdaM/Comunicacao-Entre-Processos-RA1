@@ -2,12 +2,14 @@ int reader_mode() {
     HANDLE hMapFile = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, SHM_NAME);
     if (!hMapFile) {
         log_json("error", "OpenFileMapping failed");
+        fflush(stdout);
         return 1;
     }
 
     SharedData* pData = (SharedData*)MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedData));
     if (!pData) {
         log_json("error", "MapViewOfFile failed");
+        fflush(stdout);
         CloseHandle(hMapFile);
         return 1;
     }
@@ -17,49 +19,48 @@ int reader_mode() {
 
     if (!hSemEmpty || !hSemFull) {
         log_json("error", "OpenSemaphore failed");
+        fflush(stdout);
         UnmapViewOfFile(pData);
         CloseHandle(hMapFile);
         return 1;
     }
 
     log_json("reader_ready", "listening");
+    fflush(stdout);
 
-    // Variável para controlar o loop
     bool running = true;
     
     while (running) {
-        // Verificar se há dados disponíveis com timeout
-        DWORD result = WaitForSingleObject(hSemFull, 100); // 100ms timeout
+        DWORD result = WaitForSingleObject(hSemFull, 100);
         
         if (result == WAIT_OBJECT_0) {
-            // Dados disponíveis
             char msg[BUFFER_SIZE];
             strncpy(msg, pData->buffer, BUFFER_SIZE);
             msg[BUFFER_SIZE - 1] = '\0';
             
-            // Verificar se a mensagem não está vazia
-            if (strlen(msg) > 0) {
+            if (strlen(msg) > 0 && strcmp(msg, "\0") != 0) {
                 log_json("received", msg);
+                fflush(stdout);
             }
             
             ReleaseSemaphore(hSemEmpty, 1, NULL);
         }
         else if (result == WAIT_TIMEOUT) {
-            // Timeout - verificar se deve continuar executando
             continue;
         }
         else {
-            // Erro ou objeto abandonado
+            log_json("error", "WaitForSingleObject failed");
+            fflush(stdout);
             break;
         }
     }
 
-    // Limpeza
     UnmapViewOfFile(pData);
     CloseHandle(hMapFile);
     CloseHandle(hSemEmpty);
     CloseHandle(hSemFull);
 
     log_json("reader_stopped", "clean exit");
+    fflush(stdout);
     return 0;
 }
