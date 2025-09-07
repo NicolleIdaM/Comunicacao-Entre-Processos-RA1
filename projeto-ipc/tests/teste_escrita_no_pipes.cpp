@@ -15,12 +15,12 @@ int main() {
     sa.lpSecurityDescriptor = NULL;
     
     if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
-        printf("{\"teste\":\"escrita_pipe\",\"status\":\"erro\",\"type\":\"criacao\",\"code\":%d}\n", GetLastError());
+        printf("{\"teste\":\"escrita_pipe\",\"status\":\"erro\",\"tipo\":\"criacao\",\"code\":%d}\n", GetLastError());
         return 1;
     }
     
     if (!WriteFile(hWritePipe, teste, strlen(teste) + 1, &bytesWritten, NULL)) {
-        printf("{\"teste\":\"escrita_pipe\",\"status\":\"erro\",\"type\":\"escrita\",\"code\":%d}\n", GetLastError());
+        printf("{\"teste\":\"escrita_pipe\",\"status\":\"erro\",\"tipo\":\"escrita\",\"code\":%d}\n", GetLastError());
         CloseHandle(hReadPipe);
         CloseHandle(hWritePipe);
         return 1;
