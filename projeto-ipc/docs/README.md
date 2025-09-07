@@ -31,7 +31,7 @@ projeto-ipc/
 
 ## 🚀 Mecanismos Implementados
 
-### 1. 🪠 Pipes Anônimos
+### 1. 📮 Pipes Anônimos
 - **Comunicação unidirecional** entre processos pai e filho
 - **Arquivos**: `parent.cpp` (servidor), `child.cpp` (cliente)
 - **Protocolo**: Handles de pipe herdados
