@@ -45,23 +45,33 @@ def candidates(subdir, *names):
 def find_exe(cfg_key, subdir, *names):
     # 1) salvo
     p = config.get(cfg_key)
-    if p and os.path.isfile(p): return p
+    if p and os.path.isfile(p): 
+        return p
     # 2) candidatos
     paths, root, names_tuple = candidates(subdir, *names)
     for p in paths:
         if os.path.isfile(p):
-            config[cfg_key] = p; save_config(config); return p
+            config[cfg_key] = p
+            save_config(config)
+            return p
     # 3) busca recursiva
-    for r,_,files in os.walk(root):
+    for r, _, files in os.walk(root):
         for f in files:
             if f.lower() in [n.lower() for n in names_tuple]:
-                p = os.path.join(r,f)
-                config[cfg_key] = p; save_config(config); return p
+                p = os.path.join(r, f)
+                config[cfg_key] = p
+                save_config(config)
+                return p
     # 4) diálogo
-    p = filedialog.askopenfilename(title=f"Selecione {names[0]}",
-                                   initialdir=root, filetypes=[("Executável", "*.exe")])
+    p = filedialog.askopenfilename(
+        title=f"Selecione {names[0]}",
+        initialdir=root, 
+        filetypes=[("Executável", "*.exe")]
+    )
     if p and os.path.isfile(p):
-        config[cfg_key] = p; save_config(config); return p
+        config[cfg_key] = p
+        save_config(config)
+        return p
     return None
 
 class IPCApp:
@@ -76,6 +86,12 @@ class IPCApp:
         self.server_process = None
         self.server_running = False
         self.current_server_type = None
+
+        self.sock_srv = None
+        self.sock_cli = None
+        self.pipe_srv = None
+        self.pipe_cli = None
+        self.shm_exe = None
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(script_dir)
@@ -99,21 +115,17 @@ class IPCApp:
         main_frame.rowconfigure(5, weight=1)
 
         # Seleção de IPC
-        ttk.Label(main_frame, text="Selecione o mecanismo de IPC:")\
-            .grid(row=0, column=0, sticky=W, pady=5)
+        ttk.Label(main_frame, text="Selecione o mecanismo de IPC:").grid(row=0, column=0, sticky=W, pady=5)
         ipc_button_frame = ttk.Frame(main_frame)
         ipc_button_frame.grid(row=0, column=1, sticky=(W, E), pady=5)
 
-        self.pipes_button = ttk.Button(ipc_button_frame, text="Pipes",
-                                      command=lambda: self.set_ipc_type("pipes"))
+        self.pipes_button = ttk.Button(ipc_button_frame, text="Pipes", command=lambda: self.set_ipc_type("pipes"))
         self.pipes_button.pack(side=LEFT, padx=2)
 
-        self.sockets_button = ttk.Button(ipc_button_frame, text="Sockets",
-                                         command=lambda: self.set_ipc_type("sockets"))
+        self.sockets_button = ttk.Button(ipc_button_frame, text="Sockets", command=lambda: self.set_ipc_type("sockets"))
         self.sockets_button.pack(side=LEFT, padx=2)
 
-        self.shared_memory_button = ttk.Button(ipc_button_frame, text="Shared Memory",
-                                               command=lambda: self.set_ipc_type("shared_memory"))
+        self.shared_memory_button = ttk.Button(ipc_button_frame, text="Shared Memory", command=lambda: self.set_ipc_type("shared_memory"))
         self.shared_memory_button.pack(side=LEFT, padx=2)
 
         self.highlight_selected_button()
@@ -175,8 +187,7 @@ class IPCApp:
     def set_ipc_type(self, ipc_type):
         # Não permite mudar se já tem servidor rodando
         if self.server_running and ipc_type != self.current_server_type:
-            messagebox.showwarning("Aviso", 
-                f"Pare o servidor {self.current_server_type} primeiro antes de mudar para {ipc_type}")
+            messagebox.showwarning("Aviso", f"Pare o servidor {self.current_server_type} primeiro antes de mudar para {ipc_type}")
             return
             
         self.current_ipc_type.set(ipc_type)
@@ -246,7 +257,7 @@ class IPCApp:
             if status == "running":
                 self.status_label.config(text="Memória: Ativa | Tamanho: 256B | Semáforos: Ok")
             else:
-                self.status_label.config(text="Memória: Inativa | Tamanho: 256B | Semáforemos: -")
+                self.status_label.config(text="Memória: Inativa | Tamanho: 256B | Semáforos: -")
 
     def add_to_log(self, msg):
         self.log_area.config(state=NORMAL)
@@ -276,16 +287,15 @@ class IPCApp:
                 try:
                     init_process = subprocess.run(init_args, capture_output=True, text=True, timeout=5)
                     if init_process.returncode != 0:
-                        raise Exception(f"Erro na inicialização: {init_process.stderr}")
-                except:
-                    raise Exception("Erro ao inicializar memória compartilhada")
+                        self.add_to_log(f"Aviso: {init_process.stderr}")
+                except Exception as e:
+                    self.add_to_log(f"Aviso na inicialização: {e}")
                 
                 args = [exe, "reader"]
 
             if not exe or not os.path.exists(exe):
                 raise FileNotFoundError(f"Executável não encontrado: {exe}")
 
-            # USANDO O MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
             proc = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
@@ -299,7 +309,6 @@ class IPCApp:
             self.server_running = True
             self.current_server_type = ipc
             
-            # Thread de leitura da primeira versão
             threading.Thread(target=self._reader_thread, args=(proc,), daemon=True).start()
             
             self.start_button.config(state=DISABLED)
@@ -309,15 +318,6 @@ class IPCApp:
             self.add_to_log(f"Servidor {ipc} iniciado")
             self.update_visualization("running")
             
-        except OSError as e:
-            # Tratamento específico para erro 193
-            if "193" in str(e):
-                messagebox.showerror("Erro", 
-                    "Executável não é válido para Windows.\n\n"
-                    "Execute os arquivos compile.bat nas pastas do backend.")
-            else:
-                messagebox.showerror("Erro", f"Falha ao iniciar servidor: {str(e)}")
-            self.add_to_log(f"ERRO: {str(e)}")
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao iniciar servidor: {str(e)}")
             self.add_to_log(f"ERRO: {str(e)}")
@@ -348,7 +348,6 @@ class IPCApp:
         except Exception as e:
             self.add_to_log(f"Erro ao parar servidor: {e}")
 
-    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
     def _reader_thread(self, proc):
         try:
             while proc.poll() is None:
@@ -368,7 +367,6 @@ class IPCApp:
         except Exception as e:
             self.add_to_log(f"Erro na leitura do servidor: {e}")
 
-    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
     def _handle_line(self, data):
         if not data:
             return
@@ -411,34 +409,19 @@ class IPCApp:
                 
             elif ipc == "shared_memory":
                 exe = self.shm_exe
-                args = [exe, "writer"]
+                args = [exe, "writer", msg]  # Mensagem como terceiro argumento
 
             if not exe or not os.path.exists(exe):
                 raise FileNotFoundError(f"Cliente não encontrado: {exe}")
 
-            # USANDO O MÉTODO DA PRIMEIRA VERSÃO
-            if ipc == "shared_memory":
-                p = subprocess.Popen(
-                    args,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
-                p.stdin.write(msg + "\n")
-                p.stdin.flush()
-                p.stdin.close()
-            else:
-                p = subprocess.Popen(
-                    args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
+            p = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
 
             threading.Thread(target=self._collect_client, args=(p, ipc), daemon=True).start()
             self.add_to_log(f"Enviando mensagem: {msg}")
@@ -448,7 +431,6 @@ class IPCApp:
             messagebox.showerror("Erro", f"Falha ao enviar mensagem: {str(e)}")
             self.add_to_log(f"ERRO ao enviar: {str(e)}")
 
-    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
     def _collect_client(self, p, kind):
         try:
             out, err = p.communicate(timeout=10)
