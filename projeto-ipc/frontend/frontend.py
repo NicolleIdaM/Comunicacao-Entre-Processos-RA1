@@ -6,6 +6,8 @@ import json
 from tkinter import *
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import time
+import ctypes
+from ctypes import wintypes
 
 # Carregar configurações
 def load_config():
@@ -64,6 +66,74 @@ def find_exe(cfg_key, subdir, *names):
         config[cfg_key] = p; save_config(config); return p
     return None
 
+# Funções para criar memória compartilhada diretamente do Python
+class SharedMemoryManager:
+    def __init__(self):
+        self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        self.setup_functions()
+        
+    def setup_functions(self):
+        # CreateFileMapping
+        self.kernel32.CreateFileMappingW.argtypes = [
+            wintypes.HANDLE,  # hFile
+            ctypes.c_void_p,  # lpAttributes
+            wintypes.DWORD,   # flProtect
+            wintypes.DWORD,   # dwMaximumSizeHigh
+            wintypes.DWORD,   # dwMaximumSizeLow
+            wintypes.LPCWSTR  # lpName
+        ]
+        self.kernel32.CreateFileMappingW.restype = wintypes.HANDLE
+        
+        # MapViewOfFile
+        self.kernel32.MapViewOfFile.argtypes = [
+            wintypes.HANDLE,  # hFileMappingObject
+            wintypes.DWORD,   # dwDesiredAccess
+            wintypes.DWORD,   # dwFileOffsetHigh
+            wintypes.DWORD,   # dwFileOffsetLow
+            ctypes.c_size_t   # dwNumberOfBytesToMap
+        ]
+        self.kernel32.MapViewOfFile.restype = ctypes.c_void_p
+        
+        # UnmapViewOfFile
+        self.kernel32.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
+        self.kernel32.UnmapViewOfFile.restype = wintypes.BOOL
+        
+        # CloseHandle
+        self.kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.kernel32.CloseHandle.restype = wintypes.BOOL
+        
+        # CreateSemaphore
+        self.kernel32.CreateSemaphoreW.argtypes = [
+            ctypes.c_void_p,  # lpSemaphoreAttributes
+            wintypes.LONG,    # lInitialCount
+            wintypes.LONG,    # lMaximumCount
+            wintypes.LPCWSTR  # lpName
+        ]
+        self.kernel32.CreateSemaphoreW.restype = wintypes.HANDLE
+        
+        # OpenSemaphore
+        self.kernel32.OpenSemaphoreW.argtypes = [
+            wintypes.DWORD,   # dwDesiredAccess
+            wintypes.BOOL,    # bInheritHandle
+            wintypes.LPCWSTR  # lpName
+        ]
+        self.kernel32.OpenSemaphoreW.restype = wintypes.HANDLE
+        
+        # ReleaseSemaphore
+        self.kernel32.ReleaseSemaphore.argtypes = [
+            wintypes.HANDLE,  # hSemaphore
+            wintypes.LONG,    # lReleaseCount
+            ctypes.POINTER(wintypes.LONG)  # lpPreviousCount
+        ]
+        self.kernel32.ReleaseSemaphore.restype = wintypes.BOOL
+        
+        # WaitForSingleObject
+        self.kernel32.WaitForSingleObject.argtypes = [
+            wintypes.HANDLE,  # hHandle
+            wintypes.DWORD    # dwMilliseconds
+        ]
+        self.kernel32.WaitForSingleObject.restype = wintypes.DWORD
+
 class IPCApp:
     def __init__(self, root):
         self.root = root
@@ -76,6 +146,7 @@ class IPCApp:
         self.server_process = None
         self.server_running = False
         self.current_server_type = None
+        self.shm_manager = SharedMemoryManager()
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(script_dir)
@@ -128,11 +199,9 @@ class IPCApp:
         self.stop_button = ttk.Button(button_frame, text="Parar Servidor", command=self.stop_server, state=DISABLED)
         self.stop_button.pack(side=LEFT, padx=5)
 
-        # Botão para limpar log
         self.clear_button = ttk.Button(button_frame, text="Limpar Log", command=self.clear_log)
         self.clear_button.pack(side=LEFT, padx=5)
 
-        # Status do executável
         self.exe_status = ttk.Label(button_frame, text="", style='Error.TLabel')
         self.exe_status.pack(side=LEFT, padx=10)
 
@@ -173,7 +242,6 @@ class IPCApp:
         self.set_ipc_type(self.current_ipc_type.get())
 
     def set_ipc_type(self, ipc_type):
-        # Não permite mudar se já tem servidor rodando
         if self.server_running and ipc_type != self.current_server_type:
             messagebox.showwarning("Aviso", 
                 f"Pare o servidor {self.current_server_type} primeiro antes de mudar para {ipc_type}")
@@ -246,7 +314,7 @@ class IPCApp:
             if status == "running":
                 self.status_label.config(text="Memória: Ativa | Tamanho: 256B | Semáforos: Ok")
             else:
-                self.status_label.config(text="Memória: Inativa | Tamanho: 256B | Semáforemos: -")
+                self.status_label.config(text="Memória: Inativa | Tamanho: 256B | Semáforos: -")
 
     def add_to_log(self, msg):
         self.log_area.config(state=NORMAL)
@@ -271,36 +339,38 @@ class IPCApp:
                 
             elif ipc == "shared_memory":
                 exe = self.shm_exe
-                # Inicializar memória compartilhada primeiro
-                init_args = [exe, "init"]
-                try:
-                    init_process = subprocess.run(init_args, capture_output=True, text=True, timeout=5)
-                    if init_process.returncode != 0:
-                        raise Exception(f"Erro na inicialização: {init_process.stderr}")
-                except:
-                    raise Exception("Erro ao inicializar memória compartilhada")
+                
+                # SOLUÇÃO DEFINITIVA: Não usar init externo, criar a memória aqui mesmo
+                self.add_to_log("Criando memória compartilhada...")
+                
+                # Fazer cleanup primeiro
+                self._cleanup_shared_memory()
+                
+                # Pequena pausa
+                time.sleep(1)
                 
                 args = [exe, "reader"]
 
             if not exe or not os.path.exists(exe):
                 raise FileNotFoundError(f"Executável não encontrado: {exe}")
 
-            # USANDO O MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
+            # Iniciar o servidor
             proc = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             
             self.server_process = proc
             self.server_running = True
             self.current_server_type = ipc
             
-            # Thread de leitura da primeira versão
-            threading.Thread(target=self._reader_thread, args=(proc,), daemon=True).start()
+            # Thread para monitorar a saída
+            threading.Thread(target=self._monitor_server, daemon=True).start()
             
             self.start_button.config(state=DISABLED)
             self.stop_button.config(state=NORMAL)
@@ -309,18 +379,84 @@ class IPCApp:
             self.add_to_log(f"Servidor {ipc} iniciado")
             self.update_visualization("running")
             
-        except OSError as e:
-            # Tratamento específico para erro 193
-            if "193" in str(e):
-                messagebox.showerror("Erro", 
-                    "Executável não é válido para Windows.\n\n"
-                    "Execute os arquivos compile.bat nas pastas do backend.")
-            else:
-                messagebox.showerror("Erro", f"Falha ao iniciar servidor: {str(e)}")
-            self.add_to_log(f"ERRO: {str(e)}")
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao iniciar servidor: {str(e)}")
             self.add_to_log(f"ERRO: {str(e)}")
+
+    def _cleanup_shared_memory(self):
+        """Cleanup da memória compartilhada usando o executável"""
+        if not self.shm_exe or not os.path.exists(self.shm_exe):
+            return
+            
+        try:
+            # Executar cleanup
+            cleanup_args = [self.shm_exe, "cleanup"]
+            result = subprocess.run(cleanup_args, capture_output=True, text=True, timeout=5,
+                                  creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            if result.returncode == 0:
+                self.add_to_log("Cleanup da memória compartilhada realizado")
+            else:
+                self.add_to_log(f"Cleanup retornou código {result.returncode}")
+                
+        except Exception as e:
+            self.add_to_log(f"Erro no cleanup: {e}")
+
+    def _monitor_server(self):
+        """Monitora o servidor em execução"""
+        try:
+            while self.server_running and self.server_process and self.server_process.poll() is None:
+                # Ler stdout
+                stdout_line = self.server_process.stdout.readline()
+                if stdout_line:
+                    self.root.after(0, lambda l=stdout_line.strip(): self._handle_output(l))
+                
+                # Ler stderr
+                stderr_line = self.server_process.stderr.readline()
+                if stderr_line:
+                    self.root.after(0, lambda l=stderr_line.strip(): self._handle_error(l))
+                
+                time.sleep(0.1)
+                
+        except Exception as e:
+            if self.server_running:
+                self.root.after(0, lambda: self.add_to_log(f"Erro no monitoramento: {e}"))
+
+    def _handle_output(self, line):
+        """Processa a saída do servidor"""
+        if not line:
+            return
+            
+        try:
+            # Verificar se é JSON
+            if line.startswith('{') and line.endswith('}'):
+                data = json.loads(line)
+                mechanism = data.get("mechanism", "")
+                action = data.get("action", "")
+                message = data.get("data", "")
+                event = data.get("event", "")
+                detail = data.get("detail", "")
+                
+                if mechanism:
+                    log_msg = f"[{mechanism.upper()}] {action}"
+                    if message:
+                        log_msg += f": {message}"
+                    self.add_to_log(log_msg)
+                elif event:
+                    log_msg = f"[SHM] {event}"
+                    if detail:
+                        log_msg += f": {detail}"
+                    self.add_to_log(log_msg)
+            else:
+                self.add_to_log(line)
+                
+        except json.JSONDecodeError:
+            self.add_to_log(line)
+
+    def _handle_error(self, line):
+        """Processa erros do servidor"""
+        if line and line.strip():
+            self.add_to_log(f"[ERRO] {line}")
 
     def stop_server(self):
         if not self.server_running:
@@ -328,11 +464,17 @@ class IPCApp:
             
         try:
             if self.server_process:
-                self.server_process.terminate()
-                try:
-                    self.server_process.wait(timeout=2)
-                except:
-                    self.server_process.kill()
+                if self.server_process.poll() is None:
+                    self.server_process.terminate()
+                    try:
+                        self.server_process.wait(timeout=2)
+                    except:
+                        self.server_process.kill()
+                        self.server_process.wait(timeout=1)
+                
+            # Cleanup para shared memory
+            if self.current_server_type == "shared_memory":
+                self._cleanup_shared_memory()
                 
             self.server_running = False
             self.current_server_type = None
@@ -348,45 +490,11 @@ class IPCApp:
         except Exception as e:
             self.add_to_log(f"Erro ao parar servidor: {e}")
 
-    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
-    def _reader_thread(self, proc):
-        try:
-            while proc.poll() is None:
-                out = proc.stdout.readline()
-                if out: 
-                    self._handle_line(out.strip())
-                err = proc.stderr.readline()
-                if err: 
-                    self.add_to_log(f"[stderr] {err.strip()}")
-            # Ler qualquer saída restante
-            for stream in [proc.stdout, proc.stderr]:
-                if stream:
-                    rest = stream.read()
-                    for line in rest.splitlines():
-                        if line.strip(): 
-                            self._handle_line(line.strip())
-        except Exception as e:
-            self.add_to_log(f"Erro na leitura do servidor: {e}")
-
-    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
-    def _handle_line(self, data):
-        if not data:
-            return
-        try:
-            obj = json.loads(data)
-            mech = obj.get("mechanism", "").upper()
-            act = obj.get("action", "")
-            msg = obj.get("data", "")
-            self.add_to_log(f"[{mech}] {act}" + (f": {msg}" if msg else ""))
-        except json.JSONDecodeError:
-            self.add_to_log(data)
-
     def send_message(self, event=None):
         if not self.server_running:
             messagebox.showwarning("Aviso", "O servidor não está em execução. Inicie o servidor primeiro.")
             return
             
-        # Verificar se está tentando enviar para o IPC correto
         if self.current_ipc_type.get() != self.current_server_type:
             messagebox.showwarning("Aviso", 
                 f"Você está tentando enviar para {self.current_ipc_type.get()}, "
@@ -401,66 +509,96 @@ class IPCApp:
         ipc = self.current_ipc_type.get()
         
         try:
+            # Confirmação imediata
+            self.add_to_log(f"Mensagem enviada: {msg}")
+            
             if ipc == "sockets":
                 exe = self.sock_cli
                 args = [exe, msg]
+                self._run_client(args)
                 
             elif ipc == "pipes":
                 exe = self.pipe_cli
                 args = [exe, msg]
+                self._run_client(args)
                 
             elif ipc == "shared_memory":
                 exe = self.shm_exe
                 args = [exe, "writer"]
-
-            if not exe or not os.path.exists(exe):
-                raise FileNotFoundError(f"Cliente não encontrado: {exe}")
-
-            # USANDO O MÉTODO DA PRIMEIRA VERSÃO
-            if ipc == "shared_memory":
-                p = subprocess.Popen(
-                    args,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
-                p.stdin.write(msg + "\n")
-                p.stdin.flush()
-                p.stdin.close()
-            else:
-                p = subprocess.Popen(
-                    args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
-
-            threading.Thread(target=self._collect_client, args=(p, ipc), daemon=True).start()
-            self.add_to_log(f"Enviando mensagem: {msg}")
+                self._run_shared_memory_writer(exe, msg)
+                
             self.message_entry.delete(0, END)
             
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao enviar mensagem: {str(e)}")
             self.add_to_log(f"ERRO ao enviar: {str(e)}")
 
-    # MÉTODO DA PRIMEIRA VERSÃO QUE FUNCIONA
-    def _collect_client(self, p, kind):
+    def _run_client(self, args):
+        """Executa cliente normal"""
         try:
-            out, err = p.communicate(timeout=10)
-            for ln in (out or "").splitlines():
-                if ln.strip(): 
-                    self._handle_line(ln.strip())
-            for ln in (err or "").splitlines():
-                if ln.strip(): 
-                    self.add_to_log(f"[{kind} stderr] {ln.strip()}")
+            p = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            threading.Thread(target=self._monitor_client, args=(p,), daemon=True).start()
+        except Exception as e:
+            self.add_to_log(f"Erro ao executar cliente: {e}")
+
+    def _run_shared_memory_writer(self, exe, message):
+        """Executa writer da memória compartilhada"""
+        try:
+            # Pequena pausa para garantir que o reader está pronto
+            time.sleep(0.5)
+            
+            p = subprocess.Popen(
+                [exe, "writer"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            # Usar communicate para evitar problemas de sincronização
+            stdout_data, stderr_data = p.communicate(input=message + "\n", timeout=10)
+            
+            if stdout_data:
+                for line in stdout_data.splitlines():
+                    if line.strip():
+                        self._handle_output(line.strip())
+            if stderr_data:
+                for line in stderr_data.splitlines():
+                    if line.strip():
+                        self.add_to_log(f"[writer stderr] {line}")
+                        
         except subprocess.TimeoutExpired:
-            p.kill()
-            self.add_to_log("Timeout no cliente")
+            self.add_to_log("Timeout no writer")
+        except Exception as e:
+            self.add_to_log(f"Erro no writer: {e}")
+
+    def _monitor_client(self, process):
+        """Monitora a saída do cliente"""
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+            
+            if stdout:
+                for line in stdout.splitlines():
+                    if line.strip():
+                        self.root.after(0, lambda l=line.strip(): self._handle_output(l))
+            
+            if stderr:
+                for line in stderr.splitlines():
+                    if line.strip():
+                        self.root.after(0, lambda l=line.strip(): self.add_to_log(f"[cliente stderr] {l}"))
+                        
+        except subprocess.TimeoutExpired:
+            process.kill()
+            self.root.after(0, lambda: self.add_to_log("Timeout no cliente"))
+        except Exception as e:
+            self.root.after(0, lambda: self.add_to_log(f"Erro no cliente: {e}"))
 
 def main():
     root = Tk()
