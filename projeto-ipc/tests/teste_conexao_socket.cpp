@@ -3,11 +3,12 @@
 #include <stdio.h>
 
 #define PORT 8080
+#define SERVER_IP "127.0.0.1"
 
 int main() {
     WSADATA wsaData;
     SOCKET sock;
-    struct sockaddr_in address;
+    struct sockaddr_in serv_addr;
     
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         printf("{\"teste\":\"conexao_socket\",\"status\":\"erro\",\"tipo\":\"WSAStartup\",\"code\":%d}\n", WSAGetLastError());
@@ -21,25 +22,19 @@ int main() {
         return 1;
     }
     
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(PORT);
+    serv_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     
-    if (bind(sock, (struct sockaddr *)&address, sizeof(address)) == SOCKET_ERROR) {
-        printf("{\"teste\":\"conexao_socket\",\"status\":\"erro\",\"tipo\":\"bind\",\"code\":%d}\n", WSAGetLastError());
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == SOCKET_ERROR) {
+        printf("{\"teste\":\"conexao_socket\",\"status\":\"erro\",\"tipo\":\"conectar\",\"code\":%d,\"servidor\":\"%s:%d\"}\n", 
+               WSAGetLastError(), SERVER_IP, PORT);
         closesocket(sock);
         WSACleanup();
         return 1;
     }
     
-    if (listen(sock, 3) == SOCKET_ERROR) {
-        printf("{\"teste\":\"conexao_socket\",\"status\":\"erro\",\"tipo\":\"conexao\",\"code\":%d}\n", WSAGetLastError());
-        closesocket(sock);
-        WSACleanup();
-        return 1;
-    }
-    
-    printf("{\"teste\":\"conexao_socket\",\"status\":\"successo\",\"porta\":%d}\n", PORT);
+    printf("{\"teste\":\"conexao_socket\",\"status\":\"successo\",\"servidor\":\"%s:%d\"}\n", SERVER_IP, PORT);
     
     closesocket(sock);
     WSACleanup();
