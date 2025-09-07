@@ -1,94 +1,65 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <iostream>
-#include <fstream>
-
-#ifdef _WIN32
-#include <windows.h>
-#define SLEEP_MS(ms) Sleep(ms)
-#else
-#include <unistd.h>
-#define SLEEP_MS(ms) usleep(ms * 1000)
-#endif
-
-// Formato JSON CORRETO
-void log_json(const char* action, const char* data = nullptr, const char* type = nullptr, int code = 0) {
-    if (type && code != 0) {
-        printf("{\"mechanism\":\"shared_memory\",\"action\":\"%s\",\"type\":\"%s\",\"code\":%d}\n",
-               action, type, code);
-    } else if (data) {
-        printf("{\"mechanism\":\"shared_memory\",\"action\":\"%s\",\"data\":\"%s\"}\n",
-               action, data);
-    } else {
-        printf("{\"mechanism\":\"shared_memory\",\"action\":\"%s\"}\n", action);
-    }
-    fflush(stdout);
-}
-
-// Simular memória compartilhada com arquivo temporário
-void write_to_shared_memory(const char* message) {
-    std::ofstream file("shared_memory.tmp");
-    if (file) {
-        file << message;
-        file.close();
-        log_json("sent", message);
-    } else {
-        log_json("error", nullptr, "file_write", 1);
-    }
-}
-
-void read_from_shared_memory() {
-    std::ifstream file("shared_memory.tmp");
-    if (file) {
-        std::string content;
-        std::getline(file, content);
-        file.close();
-        
-        if (!content.empty()) {
-            log_json("received", content.c_str());
-        }
-    }
-}
-
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        log_json("error", "no_command");
+int reader_mode() {
+    HANDLE hMapFile = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, SHM_NAME);
+    if (!hMapFile) {
+        log_json("error", "OpenFileMapping failed");
         return 1;
     }
 
-    if (strcmp(argv[1], "init") == 0) {
-        // Criar arquivo vazio
-        std::ofstream file("shared_memory.tmp");
-        file.close();
-        log_json("init_ok", "shared memory initialized");
-        return 0;
-    }
-    else if (strcmp(argv[1], "cleanup") == 0) {
-        remove("shared_memory.tmp");
-        log_json("cleanup_ok", "resources released");
-        return 0;
-    }
-    else if (strcmp(argv[1], "writer") == 0) {
-        if (argc < 3) {
-            log_json("error", "no_message");
-            return 1;
-        }
-        write_to_shared_memory(argv[2]);
-        return 0;
-    }
-    else if (strcmp(argv[1], "reader") == 0) {
-        log_json("reader_ready", "listening");
-        
-        // Ler continuamente
-        while (true) {
-            read_from_shared_memory();
-            SLEEP_MS(500); // 0.5 segundo
-        }
-        return 0;
-    }
-    else {
-        log_json("error", "invalid_command");
+    SharedData* pData = (SharedData*)MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedData));
+    if (!pData) {
+        log_json("error", "MapViewOfFile failed");
+        CloseHandle(hMapFile);
         return 1;
     }
+
+    HANDLE hSemEmpty = OpenSemaphoreA(SYNCHRONIZE | SEMAPHORE_MODIFY_STATE, FALSE, SEM_EMPTY);
+    HANDLE hSemFull  = OpenSemaphoreA(SYNCHRONIZE | SEMAPHORE_MODIFY_STATE, FALSE, SEM_FULL);
+
+    if (!hSemEmpty || !hSemFull) {
+        log_json("error", "OpenSemaphore failed");
+        UnmapViewOfFile(pData);
+        CloseHandle(hMapFile);
+        return 1;
+    }
+
+    log_json("reader_ready", "listening");
+
+    // Variável para controlar o loop
+    bool running = true;
+    
+    while (running) {
+        // Verificar se há dados disponíveis com timeout
+        DWORD result = WaitForSingleObject(hSemFull, 100); // 100ms timeout
+        
+        if (result == WAIT_OBJECT_0) {
+            // Dados disponíveis
+            char msg[BUFFER_SIZE];
+            strncpy(msg, pData->buffer, BUFFER_SIZE);
+            msg[BUFFER_SIZE - 1] = '\0';
+            
+            // Verificar se a mensagem não está vazia
+            if (strlen(msg) > 0) {
+                log_json("received", msg);
+            }
+            
+            ReleaseSemaphore(hSemEmpty, 1, NULL);
+        }
+        else if (result == WAIT_TIMEOUT) {
+            // Timeout - verificar se deve continuar executando
+            continue;
+        }
+        else {
+            // Erro ou objeto abandonado
+            break;
+        }
+    }
+
+    // Limpeza
+    UnmapViewOfFile(pData);
+    CloseHandle(hMapFile);
+    CloseHandle(hSemEmpty);
+    CloseHandle(hSemFull);
+
+    log_json("reader_stopped", "clean exit");
+    return 0;
 }
