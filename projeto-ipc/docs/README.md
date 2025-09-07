@@ -5,6 +5,7 @@ Este projeto tem como finalidade implementar **três mecanismos de comunicação
 ---
 
 ## 📁 Estrutura do Projeto
+```
 projeto-ipc/
 ├── 📂 backend/
 │ ├── 📂 pipes/
@@ -24,7 +25,7 @@ projeto-ipc/
 ├── 📂 docs/
 │ └── 📄 README.md
 └── ⚙️ ipc_config.json
-
+```
 
 ---
 
@@ -84,8 +85,8 @@ python frontend.py
 # 📚 Referências
 
 ### 🔗 **Documentação Técnica**
-- **Pipes Anônimos no Windows**: [TutorialsPoint - Windows Anonymous Pipe](https://www.tutorialspoint.com/windows-anonymous-pipe)
-- **Programação com Sockets em C++**: [TutorialsPoint - C++ Socket Programming](https://www.tutorialspoint.com/cplusplus/cpp_socket_programming.htm)
+- **Pipes Anônimos no Windows**: [Windows Anonymous Pipe](https://www.tutorialspoint.com/windows-anonymous-pipe)
+- **Programação com Sockets em C++**: [C++ Socket Programming](https://www.tutorialspoint.com/cplusplus/cpp_socket_programming.htm)
 
 ### 📖 **Bibliografia Complementar**
 - [Documentação oficial da Microsoft sobre Pipes Anônimos](https://learn.microsoft.com/pt-br/windows/win32/ipc/anonymous-pipes) 
