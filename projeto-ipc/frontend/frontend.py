@@ -47,23 +47,33 @@ def candidates(subdir, *names):
 def find_exe(cfg_key, subdir, *names):
     # 1) salvo
     p = config.get(cfg_key)
-    if p and os.path.isfile(p): return p
+    if p and os.path.isfile(p): 
+        return p
     # 2) candidatos
     paths, root, names_tuple = candidates(subdir, *names)
     for p in paths:
         if os.path.isfile(p):
-            config[cfg_key] = p; save_config(config); return p
+            config[cfg_key] = p
+            save_config(config)
+            return p
     # 3) busca recursiva
-    for r,_,files in os.walk(root):
+    for r, _, files in os.walk(root):
         for f in files:
             if f.lower() in [n.lower() for n in names_tuple]:
-                p = os.path.join(r,f)
-                config[cfg_key] = p; save_config(config); return p
+                p = os.path.join(r, f)
+                config[cfg_key] = p
+                save_config(config)
+                return p
     # 4) diálogo
-    p = filedialog.askopenfilename(title=f"Selecione {names[0]}",
-                                   initialdir=root, filetypes=[("Executável", "*.exe")])
+    p = filedialog.askopenfilename(
+        title=f"Selecione {names[0]}",
+        initialdir=root, 
+        filetypes=[("Executável", "*.exe")]
+    )
     if p and os.path.isfile(p):
-        config[cfg_key] = p; save_config(config); return p
+        config[cfg_key] = p
+        save_config(config)
+        return p
     return None
 
 # Funções para criar memória compartilhada diretamente do Python
@@ -148,6 +158,12 @@ class IPCApp:
         self.current_server_type = None
         self.shm_manager = SharedMemoryManager()
 
+        self.sock_srv = None
+        self.sock_cli = None
+        self.pipe_srv = None
+        self.pipe_cli = None
+        self.shm_exe = None
+
         script_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(script_dir)
 
@@ -170,21 +186,17 @@ class IPCApp:
         main_frame.rowconfigure(5, weight=1)
 
         # Seleção de IPC
-        ttk.Label(main_frame, text="Selecione o mecanismo de IPC:")\
-            .grid(row=0, column=0, sticky=W, pady=5)
+        ttk.Label(main_frame, text="Selecione o mecanismo de IPC:").grid(row=0, column=0, sticky=W, pady=5)
         ipc_button_frame = ttk.Frame(main_frame)
         ipc_button_frame.grid(row=0, column=1, sticky=(W, E), pady=5)
 
-        self.pipes_button = ttk.Button(ipc_button_frame, text="Pipes",
-                                      command=lambda: self.set_ipc_type("pipes"))
+        self.pipes_button = ttk.Button(ipc_button_frame, text="Pipes", command=lambda: self.set_ipc_type("pipes"))
         self.pipes_button.pack(side=LEFT, padx=2)
 
-        self.sockets_button = ttk.Button(ipc_button_frame, text="Sockets",
-                                         command=lambda: self.set_ipc_type("sockets"))
+        self.sockets_button = ttk.Button(ipc_button_frame, text="Sockets", command=lambda: self.set_ipc_type("sockets"))
         self.sockets_button.pack(side=LEFT, padx=2)
 
-        self.shared_memory_button = ttk.Button(ipc_button_frame, text="Shared Memory",
-                                               command=lambda: self.set_ipc_type("shared_memory"))
+        self.shared_memory_button = ttk.Button(ipc_button_frame, text="Shared Memory", command=lambda: self.set_ipc_type("shared_memory"))
         self.shared_memory_button.pack(side=LEFT, padx=2)
 
         self.highlight_selected_button()
@@ -243,8 +255,7 @@ class IPCApp:
 
     def set_ipc_type(self, ipc_type):
         if self.server_running and ipc_type != self.current_server_type:
-            messagebox.showwarning("Aviso", 
-                f"Pare o servidor {self.current_server_type} primeiro antes de mudar para {ipc_type}")
+            messagebox.showwarning("Aviso", f"Pare o servidor {self.current_server_type} primeiro antes de mudar para {ipc_type}")
             return
             
         self.current_ipc_type.set(ipc_type)
@@ -339,6 +350,7 @@ class IPCApp:
                 
             elif ipc == "shared_memory":
                 exe = self.shm_exe
+<<<<<<< HEAD
                 
                 # SOLUÇÃO DEFINITIVA: Não usar init externo, criar a memória aqui mesmo
                 self.add_to_log("Criando memória compartilhada...")
@@ -348,13 +360,26 @@ class IPCApp:
                 
                 # Pequena pausa
                 time.sleep(1)
+=======
+                # Inicializar memória compartilhada primeiro
+                init_args = [exe, "init"]
+                try:
+                    init_process = subprocess.run(init_args, capture_output=True, text=True, timeout=5)
+                    if init_process.returncode != 0:
+                        self.add_to_log(f"Aviso: {init_process.stderr}")
+                except Exception as e:
+                    self.add_to_log(f"Aviso na inicialização: {e}")
+>>>>>>> 5adc3d2b9cbdc0bdb259299f031e42ccc7f97eb0
                 
                 args = [exe, "reader"]
 
             if not exe or not os.path.exists(exe):
                 raise FileNotFoundError(f"Executável não encontrado: {exe}")
 
+<<<<<<< HEAD
             # Iniciar o servidor
+=======
+>>>>>>> 5adc3d2b9cbdc0bdb259299f031e42ccc7f97eb0
             proc = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
@@ -369,8 +394,12 @@ class IPCApp:
             self.server_running = True
             self.current_server_type = ipc
             
+
             # Thread para monitorar a saída
             threading.Thread(target=self._monitor_server, daemon=True).start()
+=======
+            threading.Thread(target=self._reader_thread, args=(proc,), daemon=True).start()
+
             
             self.start_button.config(state=DISABLED)
             self.stop_button.config(state=NORMAL)
@@ -490,6 +519,38 @@ class IPCApp:
         except Exception as e:
             self.add_to_log(f"Erro ao parar servidor: {e}")
 
+    def _reader_thread(self, proc):
+        try:
+            while proc.poll() is None:
+                out = proc.stdout.readline()
+                if out: 
+                    self._handle_line(out.strip())
+                err = proc.stderr.readline()
+                if err: 
+                    self.add_to_log(f"[stderr] {err.strip()}")
+            # Ler qualquer saída restante
+            for stream in [proc.stdout, proc.stderr]:
+                if stream:
+                    rest = stream.read()
+                    for line in rest.splitlines():
+                        if line.strip(): 
+                            self._handle_line(line.strip())
+        except Exception as e:
+            self.add_to_log(f"Erro na leitura do servidor: {e}")
+
+    def _handle_line(self, data):
+        if not data:
+            return
+        try:
+            obj = json.loads(data)
+            mech = obj.get("mechanism", "").upper()
+            act = obj.get("action", "")
+            msg = obj.get("data", "")
+            self.add_to_log(f"[{mech}] {act}" + (f": {msg}" if msg else ""))
+        except json.JSONDecodeError:
+            self.add_to_log(data)
+
+
     def send_message(self, event=None):
         if not self.server_running:
             messagebox.showwarning("Aviso", "O servidor não está em execução. Inicie o servidor primeiro.")
@@ -524,17 +585,40 @@ class IPCApp:
                 
             elif ipc == "shared_memory":
                 exe = self.shm_exe
+
                 args = [exe, "writer"]
                 self._run_shared_memory_writer(exe, msg)
                 
+=======
+                args = [exe, "writer", msg]  # Mensagem como terceiro argumento
+
+            if not exe or not os.path.exists(exe):
+                raise FileNotFoundError(f"Cliente não encontrado: {exe}")
+
+            p = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+
+            threading.Thread(target=self._collect_client, args=(p, ipc), daemon=True).start()
+            self.add_to_log(f"Enviando mensagem: {msg}")
+
             self.message_entry.delete(0, END)
             
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao enviar mensagem: {str(e)}")
             self.add_to_log(f"ERRO ao enviar: {str(e)}")
 
+
     def _run_client(self, args):
         """Executa cliente normal"""
+=======
+    def _collect_client(self, p, kind):
+
         try:
             p = subprocess.Popen(
                 args,
