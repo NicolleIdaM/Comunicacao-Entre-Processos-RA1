@@ -3,6 +3,7 @@
 #include <string.h>
 #include <iostream>
 #include <fstream>
+#include <signal.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -12,7 +13,12 @@
 #define SLEEP_MS(ms) usleep(ms * 1000)
 #endif
 
-// Formato JSON CORRETO
+volatile sig_atomic_t keep_running = 1;
+
+void handle_signal(int signal) {
+    keep_running = 0;
+}
+
 void log_json(const char* action, const char* data = nullptr, const char* type = nullptr, int code = 0) {
     if (type && code != 0) {
         printf("{\"mechanism\":\"shared_memory\",\"action\":\"%s\",\"type\":\"%s\",\"code\":%d}\n",
@@ -26,20 +32,12 @@ void log_json(const char* action, const char* data = nullptr, const char* type =
     fflush(stdout);
 }
 
-// Simular memória compartilhada com arquivo temporário
 void write_to_shared_memory(const char* message) {
-    std::ofstream file("shared_memory.tmp");
+    std::ofstream file("shared_memory.tmp", std::ios::trunc);
     if (file) {
         file << message;
         file.close();
         log_json("sent", message);
-        
-        // Pequeno delay para garantir que o reader veja a mensagem
-        SLEEP_MS(100);
-        
-        // Limpar o arquivo após escrita para próxima mensagem
-        std::ofstream clear_file("shared_memory.tmp");
-        clear_file.close();
     } else {
         log_json("error", nullptr, "file_write", 1);
     }
@@ -54,23 +52,24 @@ void read_from_shared_memory() {
         
         if (!content.empty()) {
             log_json("received", content.c_str());
-<<<<<<< HEAD
-=======
-            // NÃO limpar o conteúdo imediatamente - isso será feito pelo writer
->>>>>>> 9c3781317e0db8124eedc7f493f0b04cdac7fec0
+            // Limpar o arquivo após ler para evitar leituras duplicadas
+            std::ofstream clear_file("shared_memory.tmp", std::ios::trunc);
+            clear_file.close();
         }
     }
 }
 
 int main(int argc, char* argv[]) {
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+
     if (argc < 2) {
         log_json("error", "no_command");
         return 1;
     }
 
     if (strcmp(argv[1], "init") == 0) {
-        // Criar arquivo vazio
-        std::ofstream file("shared_memory.tmp");
+        std::ofstream file("shared_memory.tmp", std::ios::trunc);
         file.close();
         log_json("init_ok", "shared memory initialized");
         return 0;
@@ -89,13 +88,14 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     else if (strcmp(argv[1], "reader") == 0) {
-        log_json("Leitor", "ouvindo");
+        log_json("reader_ready", "listening");
         
-        // Ler continuamente
-        while (true) {
+        while (keep_running) {
             read_from_shared_memory();
-            SLEEP_MS(500); // 0.5 segundo
+            SLEEP_MS(300);
         }
+        
+        log_json("reader_stopped", "stopped by signal");
         return 0;
     }
     else {

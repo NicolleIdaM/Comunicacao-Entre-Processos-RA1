@@ -1,6 +1,3 @@
-/*****************
- * INCLUDES *
-*****************/
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <stdio.h>
@@ -9,15 +6,9 @@
 #include <iostream>
 #include <string>
 
-/*****************
- * DEFINES *
- *****************/
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
-/*****************
- * MAIN FUNCTION *
- *****************/
 int main() {
     WSADATA wsaData;
     SOCKET server_fd, new_socket;
@@ -71,53 +62,43 @@ int main() {
     printf("{\"mechanism\": \"socket\", \"action\": \"listening\", \"port\": %d}\n", PORT);
     fflush(stdout);
 
-    // Loop principal para aceitar múltiplas conexões
-    while (1) {
+    // Aceitar apenas uma conexão por vez (mais simples)
+    while (true) {
         // Accept conexão
         new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
         if (new_socket == INVALID_SOCKET) {
             printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"accept\", \"code\": %d}\n", WSAGetLastError());
-            continue; // Continuar em vez de sair
+            continue;
         }
 
         printf("{\"mechanism\": \"socket\", \"action\": \"accepted\"}\n");
         fflush(stdout);
 
         // Ler dados do cliente
-        int bytesRead = recv(new_socket, buffer, BUFFER_SIZE, 0);
+        int bytesRead = recv(new_socket, buffer, BUFFER_SIZE - 1, 0);
         if (bytesRead > 0) {
-            buffer[bytesRead] = '\0'; // Garantir terminação da string
+            buffer[bytesRead] = '\0';
             printf("{\"mechanism\": \"socket\", \"action\": \"received\", \"data\": \"%s\", \"bytes\": %d}\n", buffer, bytesRead);
             fflush(stdout);
 
-            // Enviar resposta
-            std::string response = "Mensagem recebida: ";
-            response += buffer;
-            int bytesSent = send(new_socket, response.c_str(), (int)response.length(), 0);
+            // Enviar resposta simples
+            const char* response = "ACK";
+            int bytesSent = send(new_socket, response, strlen(response), 0);
             if (bytesSent == SOCKET_ERROR) {
                 printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"send\", \"code\": %d}\n", WSAGetLastError());
-            } else {
-                printf("{\"mechanism\": \"socket\", \"action\": \"sent\", \"data\": \"%s\", \"bytes\": %d}\n", response.c_str(), bytesSent);
-                fflush(stdout);
             }
-        } else if (bytesRead == 0) {
-            printf("{\"mechanism\": \"socket\", \"action\": \"disconnected\", \"reason\": \"client_closed\"}\n");
-            fflush(stdout);
-        } else {
-            printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"recv\", \"code\": %d}\n", WSAGetLastError());
-            fflush(stdout);
         }
 
-        // Fechar socket do cliente, mas manter servidor aberto
+        // Fechar conexão
         closesocket(new_socket);
-        memset(buffer, 0, BUFFER_SIZE); // Limpar buffer para próxima conexão
+        memset(buffer, 0, BUFFER_SIZE);
+        
+        // Pequeno delay para evitar sobrecarga
+        Sleep(100);
     }
 
-    // Fechar sockets (este código não será alcançado no loop infinito)
+    // Limpeza (nunca será alcançado)
     closesocket(server_fd);
     WSACleanup();
-
-    printf("{\"mechanism\": \"socket\", \"action\": \"closed\"}\n");
-    fflush(stdout);
     return 0;
 }
