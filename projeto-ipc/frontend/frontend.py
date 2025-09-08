@@ -6,7 +6,6 @@ import json
 from tkinter import *
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import time
-import signal
 
 # Carregar configurações
 def load_config():
@@ -87,7 +86,6 @@ class IPCApp:
         self.server_process = None
         self.server_running = False
         self.current_server_type = None
-        self.reader_thread = None
 
         self.sock_srv = None
         self.sock_cli = None
@@ -133,7 +131,7 @@ class IPCApp:
         self.highlight_selected_button()
 
         # Controles do servidor
-        button_frame = tttk.Frame(main_frame)
+        button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=1, column=0, columnspan=2, pady=10)
 
         self.start_button = ttk.Button(button_frame, text="Iniciar Servidor", command=self.start_server)
@@ -311,9 +309,7 @@ class IPCApp:
             self.server_running = True
             self.current_server_type = ipc
             
-            # Iniciar thread para ler a saída do servidor
-            self.reader_thread = threading.Thread(target=self._reader_thread, args=(proc,), daemon=True)
-            self.reader_thread.start()
+            threading.Thread(target=self._reader_thread, args=(proc,), daemon=True).start()
             
             self.start_button.config(state=DISABLED)
             self.stop_button.config(state=NORMAL)
@@ -331,15 +327,6 @@ class IPCApp:
             return
             
         try:
-            # Chamar cleanup para o shared memory
-            if self.current_server_type == "shared_memory" and self.shm_exe:
-                cleanup_args = [self.shm_exe, "cleanup"]
-                try:
-                    subprocess.run(cleanup_args, timeout=2, capture_output=True)
-                    self.add_to_log("Recursos da memória compartilhada liberados")
-                except Exception as e:
-                    self.add_to_log(f"Aviso no cleanup: {e}")
-            
             if self.server_process:
                 self.server_process.terminate()
                 try:
@@ -363,29 +350,22 @@ class IPCApp:
 
     def _reader_thread(self, proc):
         try:
-            while proc.poll() is None and self.server_running:
-                try:
-                    out = proc.stdout.readline()
-                    if out and self.server_running:
-                        cleaned = out.strip()
-                        if cleaned:  # Só processar se não for linha vazia
-                            self._handle_line(cleaned)
-                    
-                    err = proc.stderr.readline()
-                    if err and self.server_running:
-                        cleaned_err = err.strip()
-                        if cleaned_err:
-                            self.add_to_log(f"[stderr] {cleaned_err}")
-                except Exception as e:
-                    if self.server_running:
-                        self.add_to_log(f"Erro na leitura: {e}")
-                    
-                # Pequeno delay para evitar sobrecarga
-                time.sleep(0.1)
-                
+            while proc.poll() is None:
+                out = proc.stdout.readline()
+                if out: 
+                    self._handle_line(out.strip())
+                err = proc.stderr.readline()
+                if err: 
+                    self.add_to_log(f"[stderr] {err.strip()}")
+            # Ler qualquer saída restante
+            for stream in [proc.stdout, proc.stderr]:
+                if stream:
+                    rest = stream.read()
+                    for line in rest.splitlines():
+                        if line.strip(): 
+                            self._handle_line(line.strip())
         except Exception as e:
-            if self.server_running:
-                self.add_to_log(f"Erro na thread do servidor: {e}")
+            self.add_to_log(f"Erro na leitura do servidor: {e}")
 
     def _handle_line(self, data):
         if not data:
@@ -429,20 +409,18 @@ class IPCApp:
                 
             elif ipc == "shared_memory":
                 exe = self.shm_exe
-                args = [exe, "writer", msg]
+                args = [exe, "writer", msg]  # Mensagem como terceiro argumento
 
             if not exe or not os.path.exists(exe):
                 raise FileNotFoundError(f"Cliente não encontrado: {exe}")
 
-            # Usar Popen com shell=True para Windows pode resolver problemas
             p = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
-                universal_newlines=True,
-                shell=True  # Adicionar isso para Windows
+                universal_newlines=True
             )
 
             threading.Thread(target=self._collect_client, args=(p, ipc), daemon=True).start()
