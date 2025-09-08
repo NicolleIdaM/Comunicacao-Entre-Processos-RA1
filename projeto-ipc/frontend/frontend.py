@@ -75,7 +75,7 @@ def find_exe(cfg_key, subdir, *names):
     return None
 
 class IPCApp:
-    def _init_(self, root):
+    def __init__(self, root):
         self.root = root
         self.root.title("Comunicação entre Processos - IPC")
         self.root.geometry("800x600")
@@ -449,5 +449,5 @@ def main():
     app = IPCApp(root)
     root.mainloop()
 
-if __name__ == "_main_":
+if __name__ == "__main__":
     main()
