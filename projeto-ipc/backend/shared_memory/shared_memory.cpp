@@ -33,6 +33,13 @@ void write_to_shared_memory(const char* message) {
         file << message;
         file.close();
         log_json("sent", message);
+        
+        // Pequeno delay para garantir que o reader veja a mensagem
+        SLEEP_MS(100);
+        
+        // Limpar o arquivo após escrita para próxima mensagem
+        std::ofstream clear_file("shared_memory.tmp");
+        clear_file.close();
     } else {
         log_json("error", nullptr, "file_write", 1);
     }
@@ -47,6 +54,10 @@ void read_from_shared_memory() {
         
         if (!content.empty()) {
             log_json("received", content.c_str());
+<<<<<<< HEAD
+=======
+            // NÃO limpar o conteúdo imediatamente - isso será feito pelo writer
+>>>>>>> 9c3781317e0db8124eedc7f493f0b04cdac7fec0
         }
     }
 }

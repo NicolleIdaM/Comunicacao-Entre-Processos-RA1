@@ -361,6 +361,7 @@ class IPCApp:
         except Exception as e:
             self.add_to_log(f"Erro ao parar servidor: {e}")
 
+    # Método _reader_thread:
     def _reader_thread(self, proc):
         try:
             while proc.poll() is None and self.server_running:
@@ -371,12 +372,10 @@ class IPCApp:
                 if err and self.server_running:
                     self.add_to_log(f"[stderr] {err.strip()}")
             # Ler qualquer saída restante
-            for stream in [proc.stdout, proc.stderr]:
-                if stream:
-                    rest = stream.read()
-                    for line in rest.splitlines():
-                        if line.strip() and self.server_running:
-                            self._handle_line(line.strip())
+            while proc.poll() is None:
+                out = proc.stdout.readline()
+                if out and self.server_running:
+                    self._handle_line(out.strip())
         except Exception as e:
             if self.server_running:
                 self.add_to_log(f"Erro na leitura do servidor: {e}")
