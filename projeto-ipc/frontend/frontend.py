@@ -133,7 +133,7 @@ class IPCApp:
         self.highlight_selected_button()
 
         # Controles do servidor
-        button_frame = ttk.Frame(main_frame)
+        button_frame = tttk.Frame(main_frame)
         button_frame.grid(row=1, column=0, columnspan=2, pady=10)
 
         self.start_button = ttk.Button(button_frame, text="Iniciar Servidor", command=self.start_server)
