@@ -33,6 +33,9 @@ int main() {
             // Enviar mensagem recebida para o frontend
             printf("{\"mechanism\":\"pipe\",\"action\":\"received\",\"data\":\"%s\",\"bytes\":%lu}\n", buffer, bytesRead);
             fflush(stdout);
+            
+            // Limpar o buffer para a próxima leitura
+            memset(buffer, 0, BUFFER_SIZE);
         }
         Sleep(100); // Evitar consumo excessivo de CPU
     }
