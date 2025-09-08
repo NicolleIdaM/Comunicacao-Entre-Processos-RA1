@@ -6,7 +6,6 @@ import json
 from tkinter import *
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import time
-import signal
 
 # Carregar configurações
 def load_config():
@@ -76,7 +75,7 @@ def find_exe(cfg_key, subdir, *names):
     return None
 
 class IPCApp:
-    def __init__(self, root):
+    def _init_(self, root):
         self.root = root
         self.root.title("Comunicação entre Processos - IPC")
         self.root.geometry("800x600")
@@ -87,7 +86,6 @@ class IPCApp:
         self.server_process = None
         self.server_running = False
         self.current_server_type = None
-        self.reader_thread = None
 
         self.sock_srv = None
         self.sock_cli = None
@@ -311,9 +309,7 @@ class IPCApp:
             self.server_running = True
             self.current_server_type = ipc
             
-            # Iniciar thread para ler a saída do servidor
-            self.reader_thread = threading.Thread(target=self._reader_thread, args=(proc,), daemon=True)
-            self.reader_thread.start()
+            threading.Thread(target=self._reader_thread, args=(proc,), daemon=True).start()
             
             self.start_button.config(state=DISABLED)
             self.stop_button.config(state=NORMAL)
@@ -331,15 +327,6 @@ class IPCApp:
             return
             
         try:
-            # Chamar cleanup para o shared memory
-            if self.current_server_type == "shared_memory" and self.shm_exe:
-                cleanup_args = [self.shm_exe, "cleanup"]
-                try:
-                    subprocess.run(cleanup_args, timeout=2, capture_output=True)
-                    self.add_to_log("Recursos da memória compartilhada liberados")
-                except Exception as e:
-                    self.add_to_log(f"Aviso no cleanup: {e}")
-            
             if self.server_process:
                 self.server_process.terminate()
                 try:
@@ -361,24 +348,24 @@ class IPCApp:
         except Exception as e:
             self.add_to_log(f"Erro ao parar servidor: {e}")
 
-    # Método _reader_thread:
     def _reader_thread(self, proc):
         try:
-            while proc.poll() is None and self.server_running:
-                out = proc.stdout.readline()
-                if out and self.server_running:
-                    self._handle_line(out.strip())
-                err = proc.stderr.readline()
-                if err and self.server_running:
-                    self.add_to_log(f"[stderr] {err.strip()}")
-            # Ler qualquer saída restante
             while proc.poll() is None:
                 out = proc.stdout.readline()
-                if out and self.server_running:
+                if out: 
                     self._handle_line(out.strip())
+                err = proc.stderr.readline()
+                if err: 
+                    self.add_to_log(f"[stderr] {err.strip()}")
+            # Ler qualquer saída restante
+            for stream in [proc.stdout, proc.stderr]:
+                if stream:
+                    rest = stream.read()
+                    for line in rest.splitlines():
+                        if line.strip(): 
+                            self._handle_line(line.strip())
         except Exception as e:
-            if self.server_running:
-                self.add_to_log(f"Erro na leitura do servidor: {e}")
+            self.add_to_log(f"Erro na leitura do servidor: {e}")
 
     def _handle_line(self, data):
         if not data:
@@ -411,12 +398,6 @@ class IPCApp:
             
         ipc = self.current_ipc_type.get()
         
-        # Verificar se o arquivo de shared memory existe para evitar erros
-        if (ipc == "shared_memory" and 
-            not os.path.exists("shared_memory.tmp")):
-            messagebox.showwarning("Aviso", "Memória compartilhada não inicializada. Inicie o servidor primeiro.")
-            return
-            
         try:
             if ipc == "sockets":
                 exe = self.sock_cli
@@ -468,5 +449,5 @@ def main():
     app = IPCApp(root)
     root.mainloop()
 
-if __name__ == "__main__":
+if __name__ == "_main_":
     main()
