@@ -28,13 +28,20 @@ int main() {
     
     // Loop principal para ler do pipe
     while (1) {
-        if (ReadFile(hReadPipe, buffer, BUFFER_SIZE - 1, &bytesRead, NULL) && bytesRead > 0) {
-            buffer[bytesRead] = '\0';
-            // Enviar mensagem recebida para o frontend
-            printf("{\"mechanism\":\"pipe\",\"action\":\"received\",\"data\":\"%s\",\"bytes\":%lu}\n", buffer, bytesRead);
-            fflush(stdout);
+        if (ReadFile(hReadPipe, buffer, BUFFER_SIZE - 1, &bytesRead, NULL)) {
+            if (bytesRead > 0) {
+                buffer[bytesRead] = '\0';
+                // Verificar se é uma mensagem válida
+                if (strlen(buffer) > 0 && buffer[0] != '\0' && buffer[0] != '\n' && buffer[0] != '\r') {
+                    // Enviar mensagem recebida para o frontend
+                    printf("{\"mechanism\":\"pipe\",\"action\":\"received\",\"data\":\"%s\",\"bytes\":%lu}\n", buffer, bytesRead);
+                    fflush(stdout);
+                }
+            }
         }
-        Sleep(100); // Evitar consumo excessivo de CPU
+        // Limpar o buffer para a próxima leitura
+        memset(buffer, 0, BUFFER_SIZE);
+        Sleep(50); // Pequeno delay
     }
     
     CloseHandle(hReadPipe);

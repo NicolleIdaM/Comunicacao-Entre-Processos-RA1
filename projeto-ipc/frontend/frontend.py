@@ -361,24 +361,31 @@ class IPCApp:
         except Exception as e:
             self.add_to_log(f"Erro ao parar servidor: {e}")
 
-    # Método _reader_thread:
     def _reader_thread(self, proc):
         try:
             while proc.poll() is None and self.server_running:
-                out = proc.stdout.readline()
-                if out and self.server_running:
-                    self._handle_line(out.strip())
-                err = proc.stderr.readline()
-                if err and self.server_running:
-                    self.add_to_log(f"[stderr] {err.strip()}")
-            # Ler qualquer saída restante
-            while proc.poll() is None:
-                out = proc.stdout.readline()
-                if out and self.server_running:
-                    self._handle_line(out.strip())
+                try:
+                    out = proc.stdout.readline()
+                    if out and self.server_running:
+                        cleaned = out.strip()
+                        if cleaned:  # Só processar se não for linha vazia
+                            self._handle_line(cleaned)
+                    
+                    err = proc.stderr.readline()
+                    if err and self.server_running:
+                        cleaned_err = err.strip()
+                        if cleaned_err:
+                            self.add_to_log(f"[stderr] {cleaned_err}")
+                except Exception as e:
+                    if self.server_running:
+                        self.add_to_log(f"Erro na leitura: {e}")
+                    
+                # Pequeno delay para evitar sobrecarga
+                time.sleep(0.1)
+                
         except Exception as e:
             if self.server_running:
-                self.add_to_log(f"Erro na leitura do servidor: {e}")
+                self.add_to_log(f"Erro na thread do servidor: {e}")
 
     def _handle_line(self, data):
         if not data:
@@ -411,12 +418,6 @@ class IPCApp:
             
         ipc = self.current_ipc_type.get()
         
-        # Verificar se o arquivo de shared memory existe para evitar erros
-        if (ipc == "shared_memory" and 
-            not os.path.exists("shared_memory.tmp")):
-            messagebox.showwarning("Aviso", "Memória compartilhada não inicializada. Inicie o servidor primeiro.")
-            return
-            
         try:
             if ipc == "sockets":
                 exe = self.sock_cli
@@ -428,18 +429,20 @@ class IPCApp:
                 
             elif ipc == "shared_memory":
                 exe = self.shm_exe
-                args = [exe, "writer", msg]  # Mensagem como terceiro argumento
+                args = [exe, "writer", msg]
 
             if not exe or not os.path.exists(exe):
                 raise FileNotFoundError(f"Cliente não encontrado: {exe}")
 
+            # Usar Popen com shell=True para Windows pode resolver problemas
             p = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                shell=True  # Adicionar isso para Windows
             )
 
             threading.Thread(target=self._collect_client, args=(p, ipc), daemon=True).start()
