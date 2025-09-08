@@ -71,45 +71,49 @@ int main() {
     printf("{\"mechanism\": \"socket\", \"action\": \"listening\", \"port\": %d}\n", PORT);
     fflush(stdout);
 
-    // Accept conexão
-    new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
-    if (new_socket == INVALID_SOCKET) {
-        printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"accept\", \"code\": %d}\n", WSAGetLastError());
-        closesocket(server_fd);
-        WSACleanup();
-        return 1;
-    }
+    // Loop principal para aceitar múltiplas conexões
+    while (1) {
+        // Accept conexão
+        new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
+        if (new_socket == INVALID_SOCKET) {
+            printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"accept\", \"code\": %d}\n", WSAGetLastError());
+            continue; // Continuar em vez de sair
+        }
 
-    printf("{\"mechanism\": \"socket\", \"action\": \"accepted\"}\n");
-    fflush(stdout);
-
-    // Ler dados do cliente
-    int bytesRead = recv(new_socket, buffer, BUFFER_SIZE, 0);
-    if (bytesRead > 0) {
-        buffer[bytesRead] = '\0'; // Garantir terminação da string
-        printf("{\"mechanism\": \"socket\", \"action\": \"received\", \"data\": \"%s\", \"bytes\": %d}\n", buffer, bytesRead);
+        printf("{\"mechanism\": \"socket\", \"action\": \"accepted\"}\n");
         fflush(stdout);
 
-        // Enviar resposta
-        std::string response = "Mensagem recebida: ";
-        response += buffer;
-        int bytesSent = send(new_socket, response.c_str(), (int)response.length(), 0);
-        if (bytesSent == SOCKET_ERROR) {
-            printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"send\", \"code\": %d}\n", WSAGetLastError());
+        // Ler dados do cliente
+        int bytesRead = recv(new_socket, buffer, BUFFER_SIZE, 0);
+        if (bytesRead > 0) {
+            buffer[bytesRead] = '\0'; // Garantir terminação da string
+            printf("{\"mechanism\": \"socket\", \"action\": \"received\", \"data\": \"%s\", \"bytes\": %d}\n", buffer, bytesRead);
+            fflush(stdout);
+
+            // Enviar resposta
+            std::string response = "Mensagem recebida: ";
+            response += buffer;
+            int bytesSent = send(new_socket, response.c_str(), (int)response.length(), 0);
+            if (bytesSent == SOCKET_ERROR) {
+                printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"send\", \"code\": %d}\n", WSAGetLastError());
+            } else {
+                printf("{\"mechanism\": \"socket\", \"action\": \"sent\", \"data\": \"%s\", \"bytes\": %d}\n", response.c_str(), bytesSent);
+                fflush(stdout);
+            }
+        } else if (bytesRead == 0) {
+            printf("{\"mechanism\": \"socket\", \"action\": \"disconnected\", \"reason\": \"client_closed\"}\n");
+            fflush(stdout);
         } else {
-            printf("{\"mechanism\": \"socket\", \"action\": \"sent\", \"data\": \"%s\", \"bytes\": %d}\n", response.c_str(), bytesSent);
+            printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"recv\", \"code\": %d}\n", WSAGetLastError());
             fflush(stdout);
         }
-    } else if (bytesRead == 0) {
-        printf("{\"mechanism\": \"socket\", \"action\": \"disconnected\", \"reason\": \"client_closed\"}\n");
-        fflush(stdout);
-    } else {
-        printf("{\"mechanism\": \"socket\", \"action\": \"error\", \"type\": \"recv\", \"code\": %d}\n", WSAGetLastError());
-        fflush(stdout);
+
+        // Fechar socket do cliente, mas manter servidor aberto
+        closesocket(new_socket);
+        memset(buffer, 0, BUFFER_SIZE); // Limpar buffer para próxima conexão
     }
 
-    // Fechar sockets
-    closesocket(new_socket);
+    // Fechar sockets (este código não será alcançado no loop infinito)
     closesocket(server_fd);
     WSACleanup();
 
